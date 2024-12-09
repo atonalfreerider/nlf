@@ -1,0 +1,14 @@
+proc_side: 384
+
+stride_train: 32
+stride_test: 32
+centered_stride: true
+
+# Model
+efficientnet_size: l
+backbone: efficientnetv2-l
+depth: 8
+box_size_m: 2.2
+
+weak_perspective: false
+mix_3d_inside_fov: 0.5
