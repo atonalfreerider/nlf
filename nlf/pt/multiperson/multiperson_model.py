@@ -16,6 +16,10 @@ from nlf.pt import ptu, ptu3d
 from nlf.pt.multiperson import person_detector, plausibility_check as plausib, warping
 from nlf.pt.util import get_config
 import simplepyutils as spu
+import argparse
+
+
+FLAGS = argparse.Namespace()
 
 # Dummy value which will mean that the intrinsic_matrix are unknown
 UNKNOWN_INTRINSIC_MATRIX = ((-1, -1, -1), (-1, -1, -1), (-1, -1, -1))
@@ -23,20 +27,20 @@ DEFAULT_EXTRINSIC_MATRIX = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 
 DEFAULT_DISTORTION = (0, 0, 0, 0, 0)
 DEFAULT_WORLD_UP = (0, -1, 0)
 
-
-
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input-model-path', type=str)
+    parser.add_argument('--output-model-path', type=str)
+    parser.add_argument('--config-name', type=str, default='convert_from_tf_s')
+    parser.parse_args(namespace=FLAGS)
+
     skeleton_infos = spu.load_pickle(f"{DATA_ROOT}/skeleton_conversion/skeleton_types_huge8.pkl")
     cano_joints = np.load(f'{PROJDIR}/canonical_joints/smpl.npy').astype(np.float32)
-    cano_verts = np.load(f'{PROJDIR}/canonical_verts/smpl.npy').astype(np.float32)
-    cano_both = np.concatenate([cano_joints, cano_verts], axis=0)
     image = imageio.imread(
         '/work/sarandi/data/example_256px.jpg')[np.newaxis].astype(np.float32) / 255
     intrinsics = cameralib.intrinsics_from_fov(
         30, [256, 256])[np.newaxis].astype(np.float32)
-    cfg = get_config('convert_from_tf_l_384')
-
-    pytorch_path = f'.../nlf_l.pt'
+    cfg = get_config(FLAGS.config_name)
 
     with torch.device('cuda'):
         backbone_raw = getattr(effnet_pytorch, f'efficientnet_v2_{cfg.efficientnet_size}')()
@@ -44,7 +48,7 @@ def main():
         backbone = torch.nn.Sequential(preproc_layer, backbone_raw.features)
         weight_field = pt_field.build_field()
         model_pytorch = pt_nlf_model.NLFModel(backbone, weight_field)
-        model_pytorch.load_state_dict(torch.load(pytorch_path, weights_only=True))
+        model_pytorch.load_state_dict(torch.load(FLAGS.input_model_path, weights_only=True))
 
     model_pytorch = model_pytorch.cuda().eval()
     model_pytorch.eval()
@@ -59,18 +63,15 @@ def main():
     detector = person_detector.PersonDetector(f'{DATA_ROOT}/yolov8x.torchscript')
     multimodel = MultipersonNLF(model_pytorch, detector, skeleton_infos).cuda().eval()
     multimodel = torch.jit.script(multimodel)
-    torch.jit.save(multimodel, 'nlf_l.torchscript')
+    torch.jit.save(multimodel, FLAGS.output_model_path)
 
 
 class MultipersonNLF(torch.nn.Module):
     def __init__(self, crop_model, detector, skeleton_infos):
         super().__init__()
 
-        # Note that only the Trackable resource attributes such as Variables and Models will be
-        # retained when saving to SavedModel
         self.crop_model = crop_model
         self.detector = detector
-        # self.detector = person_detector.PersonDetector()
 
         body_models = ['smpl', 'smplx']
         vertex_subset = {
@@ -152,7 +153,8 @@ class MultipersonNLF(torch.nn.Module):
             default_fov_degrees: float = 55.0,
             internal_batch_size: int = 64,
             antialias_factor: int = 1,
-            num_aug: int = 1, rot_aug_max_degrees: float = 25.0,
+            num_aug: int = 1,
+            rot_aug_max_degrees: float = 25.0,
             beta_regularizer: float = 10.0,
             beta_regularizer2: float = 0.0,
             model_name: str = 'smpl'):
@@ -174,7 +176,8 @@ class MultipersonNLF(torch.nn.Module):
             default_fov_degrees: float = 55.0,
             internal_batch_size: int = 64,
             antialias_factor: int = 1,
-            num_aug: int = 1, rot_aug_max_degrees: float = 25.0,
+            num_aug: int = 1,
+            rot_aug_max_degrees: float = 25.0,
             suppress_implausible_poses: bool = True,
             beta_regularizer: float = 10.0,
             beta_regularizer2: float = 0.0,
@@ -267,7 +270,8 @@ class MultipersonNLF(torch.nn.Module):
             default_fov_degrees: float = 55.0,
             internal_batch_size: int = 64,
             antialias_factor: int = 1,
-            num_aug: int = 1, rot_aug_max_degrees: float = 25.0,
+            num_aug: int = 1,
+            rot_aug_max_degrees: float = 25.0,
             detector_threshold: float = 0.3,
             detector_nms_iou_threshold: float = 0.7, max_detections: int = 150,
             suppress_implausible_poses: bool = True):
@@ -809,3 +813,6 @@ def weighted_mean(x: torch.Tensor, w: torch.Tensor, dim: int = -2, keepdim: bool
     return (
             (x * w).sum(dim=dim, keepdim=keepdim) /
             w.sum(dim=dim, keepdim=keepdim))
+
+if __name__ == '__main__':
+    main()

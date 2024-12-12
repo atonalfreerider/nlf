@@ -20,7 +20,3 @@ fix_uncert_factor: false
 
 weak_perspective: false
 mix_3d_inside_fov: 0.5
-
-# Paths
-load_path: /work_uncached/sarandi/data/experiments/cwl/huge8_2_effv2s256_100k_reprod_d2d_lr0.15_rebalance1_frmh36_fov_betanllgood9_base2_2gpu_contborder0_100/ckpt-300000.pt
-joint_info_path: /work/sarandi/data/cache/huge8_joint_info.pkl

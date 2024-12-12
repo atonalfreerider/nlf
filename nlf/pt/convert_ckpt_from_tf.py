@@ -21,8 +21,8 @@ FLAGS = argparse.Namespace()
 
 def initialize():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input-model-path', type=str, default='')
-    parser.add_argument('--output-model-path', type=str, default='')
+    parser.add_argument('--input-model-path', type=str)
+    parser.add_argument('--output-model-path', type=str)
     parser.add_argument('--config-name', type=str, default='convert_from_tf_s')
     parser.parse_args(namespace=FLAGS)
     for gpu in tf.config.experimental.list_physical_devices('GPU'):
