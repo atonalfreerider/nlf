@@ -1,5 +1,6 @@
 # Neural Localizer Fields for Continuous 3D Human Pose and Shape Estimation
-[NeurIPS'24 paper](https://arxiv.org/abs/2407.07532) by István Sárándi and Gerard Pons-Moll
+* [NeurIPS'24 paper](https://arxiv.org/abs/2407.07532) by István Sárándi and Gerard Pons-Moll
+* [Project page](https://istvansarandi.com/nlf)
 
 Models for PyTorch and TensorFlow are available for noncommercial research use under Releases, and usage examples are given in `demo.ipynb`. Stay tuned for more detailed docs.
 
