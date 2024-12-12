@@ -211,7 +211,7 @@ def load_arrays(parameters):
         faces_all = load_array(f'{PROJDIR}/smpl_faces.npy')
         face_probs = load_array(f'{PROJDIR}/smpl_face_probs.npy')
         canonical_points_surf_all = load_array(f'{PROJDIR}/canonical_vertices_smpl.npy')
-        # g = {'m': 'm', 'n': 'm', 'f': 'f'}[gender[0]]
+
         if parameters['type'] == 'smpl':
             interp_weights_intern_all = MemMappedCSR(f'{PROJDIR}/internal_regressor_m.csr')
             canonical_joints = load_array(f'{PROJDIR}/canonical_joints_m.npy')

@@ -5,7 +5,7 @@ import warnings
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
-from nlf.pytorch.util import get_config
+from nlf.pt.util import get_config
 import torch
 from torch import Tensor, nn
 from torchvision.models._api import Weights, WeightsEnum

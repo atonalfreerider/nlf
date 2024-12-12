@@ -18,7 +18,7 @@ import torch
 import matplotlib.pyplot as plt
 import simplepyutils as spu
 from simplepyutils import FLAGS, logger
-from nlf.pytorch import util
+from nlf.pt import util
 from posepile.paths import DATA_ROOT
 
 

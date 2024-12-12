@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from nlf.pytorch import ptu
+from nlf.pt import ptu
 from typing import Optional, Tuple, List
 
 

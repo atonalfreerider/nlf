@@ -8,27 +8,25 @@ import smplfitter.pt as smplfitter
 import torch
 import torchvision.transforms.functional
 
-import nlf.pytorch.backbones.efficientnet as effnet_pytorch
-import nlf.pytorch.models.field as pt_field
-import nlf.pytorch.models.nlf_model as pt_nlf_model
+import nlf.pt.backbones.efficientnet as effnet_pytorch
+import nlf.pt.models.field as pt_field
+import nlf.pt.models.nlf_model as pt_nlf_model
 from nlf.paths import DATA_ROOT, PROJDIR
-from nlf.pytorch import ptu, ptu3d
-from nlf.pytorch.multiperson import person_detector, plausibility_check as plausib, warping
-from nlf.pytorch.util import get_config
+from nlf.pt import ptu, ptu3d
+from nlf.pt.multiperson import person_detector, plausibility_check as plausib, warping
+from nlf.pt.util import get_config
+import simplepyutils as spu
 
 # Dummy value which will mean that the intrinsic_matrix are unknown
 UNKNOWN_INTRINSIC_MATRIX = ((-1, -1, -1), (-1, -1, -1), (-1, -1, -1))
 DEFAULT_EXTRINSIC_MATRIX = ((1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1))
 DEFAULT_DISTORTION = (0, 0, 0, 0, 0)
 DEFAULT_WORLD_UP = (0, -1, 0)
-crop__ = None
-import smplfitter
-import simplepyutils as spu
+
 
 
 def main():
     skeleton_infos = spu.load_pickle(f"{DATA_ROOT}/skeleton_conversion/skeleton_types_huge8.pkl")
-
     cano_joints = np.load(f'{PROJDIR}/canonical_joints/smpl.npy').astype(np.float32)
     cano_verts = np.load(f'{PROJDIR}/canonical_verts/smpl.npy').astype(np.float32)
     cano_both = np.concatenate([cano_joints, cano_verts], axis=0)

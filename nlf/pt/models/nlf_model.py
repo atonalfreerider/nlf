@@ -7,9 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from nlf.paths import PROJDIR
-from nlf.pytorch import ptu, ptu3d
-from nlf.pytorch.models import util as model_util
-from nlf.pytorch.util import get_config
+from nlf.pt import ptu, ptu3d
+from nlf.pt.models import util as model_util
+from nlf.pt.util import get_config
 
 
 class NLFModel(nn.Module):

@@ -8,13 +8,13 @@ torch  # this is a dummy line to make pycharm respect the order
 import tensorflow as tf
 
 from simplepyutils import logger
-import nlf.pytorch.backbones.efficientnet as effnet_pytorch
-import nlf.pytorch.models.nlf_model as pt_nlf_model
-import nlf.pytorch.models.field as pt_field
+import nlf.pt.backbones.efficientnet as effnet_pytorch
+import nlf.pt.models.nlf_model as pt_nlf_model
+import nlf.pt.models.field as pt_field
 import nlf.tf.backbones.builder as tf_backbones_builder
 from nlf.tf import init as tf_init, tfu
 import nlf.tf.model.field as tf_field
-from nlf.pytorch.util import get_config
+from nlf.pt.util import get_config
 
 FLAGS = argparse.Namespace()
 

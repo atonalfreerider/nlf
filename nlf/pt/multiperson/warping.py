@@ -1,5 +1,5 @@
 import torch
-from nlf.pytorch import ptu3d
+from nlf.pt import ptu3d
 import numpy as np
 from typing import List, Tuple
 

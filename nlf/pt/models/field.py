@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 from nlf.paths import PROJDIR
-from nlf.pytorch.util import get_config
+from nlf.pt.util import get_config
 
 
 def build_field():
