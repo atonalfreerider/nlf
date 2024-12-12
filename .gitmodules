@@ -1,0 +1,3 @@
+[submodule "simplepyutils"]
+	path = simplepyutils
+	url = https://github.com/isarandi/simplepyutils.git
