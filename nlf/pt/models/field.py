@@ -1,70 +1,86 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from simplepyutils import FLAGS
 
 from nlf.paths import PROJDIR
-from nlf.pt.util import get_config
 
 
 def build_field():
-    FLAGS = get_config()
-    layer_dims = (
-            [FLAGS.field_hidden_size] * FLAGS.field_hidden_layers +
-            [(FLAGS.backbone_link_dim + 1) * (FLAGS.depth + 2)])
-
-    gps_mlp = GPSBaseModel(pos_enc_dim=512, hidden_dim=2048, output_dim=FLAGS.field_posenc_dim)
-    return GPSField(gps_mlp, layer_dims=layer_dims)
+    layer_dims = [FLAGS.field_hidden_size] * FLAGS.field_hidden_layers + [
+        (FLAGS.backbone_link_dim + 1) * (FLAGS.depth + 2)
+    ]
+    gps_net = GPSNet(
+        pos_enc_dim=512, hidden_dim=2048, output_dim=FLAGS.field_posenc_dim
+    )
+    return GPSField(gps_net, layer_dims=layer_dims)
 
 
 class GPSField(nn.Module):
-    def __init__(self, lbo_mlp, layer_dims):
+    def __init__(self, gps_net, layer_dims):
         super().__init__()
-        FLAGS = get_config()
         self.posenc_dim = FLAGS.field_posenc_dim
-        self.lbo_mlp = lbo_mlp
-        self.eigva = np.load(f'{PROJDIR}/canonical_eigval3.npy')[1:].astype(np.float32)
+        self.gps_net = gps_net
 
         # TODO: the first hidden layer's weights should be regularized
-        self.hidden_layers = nn.ModuleList([
-            nn.Linear(layer_dims[i - 1] if i > 0 else FLAGS.field_posenc_dim, layer_dims[i])
-            for i in range(len(layer_dims) - 1)
-        ])
-        self.output_layer = nn.Linear(layer_dims[-2], layer_dims[-1])
-        self.out_dim = layer_dims[-1]
-        self.r_sqrt_eigva = torch.sqrt(
-            1.0 / torch.tensor(np.load(f'{PROJDIR}/canonical_eigval3.npy')[1:],
-                               dtype=torch.float32))
+        self.pred_mlp = nn.Sequential()
+        self.pred_mlp.append(nn.Linear(FLAGS.field_posenc_dim, layer_dims[0]))
+        self.pred_mlp.append(nn.GELU())
+        for i in range(1, len(layer_dims) - 1):
+            self.pred_mlp.append(nn.Linear(layer_dims[i - 1], layer_dims[i]))
+            self.pred_mlp.append(nn.GELU())
+        self.pred_mlp.append(nn.Linear(layer_dims[-2], layer_dims[-1]))
+        self.r_sqrt_eigva = nn.Buffer(
+            torch.rsqrt(
+                torch.tensor(np.load(f'{PROJDIR}/canonical_eigval3.npy')[1:], dtype=torch.float32)
+            ),
+            persistent=False,
+        )
 
     def forward(self, inp):
-        lbo = self.lbo_mlp(inp.reshape(-1, 3))[..., :self.posenc_dim]
-        inp_shape = inp.shape
-        lbo = torch.reshape(lbo, inp_shape[:-1] + (self.posenc_dim,))
-        lbo = lbo * self.r_sqrt_eigva[:self.posenc_dim] * 0.1
-
-        x = lbo
-        for layer in self.hidden_layers:
-            x = nn.functional.gelu(layer(x))
-        return self.output_layer(x)
+        lbo = self.gps_net(inp.reshape(-1, 3))[..., : self.posenc_dim]
+        lbo = torch.reshape(lbo, inp.shape[:-1] + (self.posenc_dim,))
+        lbo = lbo * self.r_sqrt_eigva[: self.posenc_dim] * 0.1
+        return self.pred_mlp(lbo)
 
 
-class GPSBaseModel(nn.Module):
+class GPSNet(nn.Module):
     def __init__(self, pos_enc_dim=512, hidden_dim=2048, output_dim=1024):
         super().__init__()
-        self.pos_enc_dim = pos_enc_dim
-        self.factor = 1 / np.sqrt(np.float32(self.pos_enc_dim))
-        self.W_r = nn.Linear(3, self.pos_enc_dim // 2, bias=False)
-        nn.init.normal_(self.W_r.weight, std=12)
-        self.dense1 = nn.Linear(self.pos_enc_dim, hidden_dim)
-        self.dense2 = nn.Linear(hidden_dim, output_dim)
-
+        self.factor = 1 / np.sqrt(np.float32(pos_enc_dim))
         nodes = np.load(f'{PROJDIR}/canonical_nodes3.npy')
-        self.mini = torch.tensor(np.min(nodes, axis=0), dtype=torch.float32)
-        self.maxi = torch.tensor(np.max(nodes, axis=0), dtype=torch.float32)
-        self.center = (self.mini + self.maxi) / 2
+        self.mini = nn.Buffer(
+            torch.tensor(np.min(nodes, axis=0), dtype=torch.float32), persistent=False
+        )
+        self.maxi = nn.Buffer(
+            torch.tensor(np.max(nodes, axis=0), dtype=torch.float32), persistent=False
+        )
+        self.center = nn.Buffer((self.mini + self.maxi) / 2, persistent=False)
+
+        self.learnable_fourier = LearnableFourierFeatures(3, pos_enc_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(pos_enc_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
 
     def forward(self, inp):
         x = (inp - self.center) / (self.maxi - self.mini)
-        x = self.W_r(x)
-        x = torch.sin(torch.cat([x, x + np.pi / 2], dim=-1)) * self.factor
-        x = nn.functional.gelu(self.dense1(x))
-        return self.dense2(x)
+        x = self.learnable_fourier(x) * self.factor
+        return self.mlp(x)
+
+
+class LearnableFourierFeatures(nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        if out_features % 2 != 0:
+            raise ValueError('out_features must be even (sin and cos in pairs)')
+        self.linear = nn.Linear(in_features, out_features // 2, bias=False)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.normal_(self.linear.weight, std=12)
+
+    def forward(self, inp):
+        x = self.linear(inp)
+        return torch.cat([torch.sin(x), torch.cos(x)], dim=-1)

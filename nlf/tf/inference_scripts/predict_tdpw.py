@@ -14,7 +14,6 @@ import rlemasklib
 import scipy.optimize
 import simplepyutils as spu
 import tensorflow as tf
-import tensorflow_hub as tfhub
 import tensorflow_inputs as tfinp
 from posepile.joint_info import JointInfo
 from simplepyutils import FLAGS, logger
@@ -38,14 +37,12 @@ def initialize():
     parser.add_argument('--testset-only', action=spu.argparse.BoolAction)
     parser.add_argument('--viz', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():
     initialize()
     logger.info('Loading model...')
-    model = tfhub.load(FLAGS.model_path)
+    model = torch.jit.load(FLAGS.model_path)
     logger.info('Model loaded.')
 
     ji3d = get_joint_info(model, 'smpl_24')

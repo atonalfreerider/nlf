@@ -101,6 +101,8 @@ def get_normalizer():
         bn = functools.partial(clazz, split=split)
     elif FLAGS.batch_renorm:
         bn = fleras.layers.BatchRenormalization
+    elif FLAGS.group_norm:
+        bn = functools.partial(keras.layers.GroupNormalization, groups=32)
     else:
         bn = keras.layers.BatchNormalization
 

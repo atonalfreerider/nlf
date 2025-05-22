@@ -1,8 +1,6 @@
 import argparse
 import os.path as osp
-import pickle
-import zipfile
-from posepile.ds.rich.main import make_joint_info
+
 import cameralib
 import cv2
 import numpy as np
@@ -11,7 +9,8 @@ import simplepyutils as spu
 import smplfitter.np
 import smplfitter.tf
 import tensorflow as tf
-from humcentr_cli.util.serialization import Reader, Writer
+import bodycompress
+from posepile.ds.rich.main import make_joint_info
 from posepile.paths import DATA_ROOT
 from simplepyutils import FLAGS
 
@@ -27,9 +26,6 @@ def initialize():
     parser.add_argument('--body-model', type=str, default='smpl')
     parser.add_argument('--viz', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
-
 
 def main():
     initialize()
@@ -50,7 +46,7 @@ def main():
         body_model_faces=body_model.faces, resolution=(1920, 1080),
         paused=True) if FLAGS.viz else None
 
-    with Writer(FLAGS.out_pred_path, vars(FLAGS)) as writer:
+    with bodycompress.BodyCompressor(FLAGS.out_pred_path, metadata=vars(FLAGS)) as writer:
         for batch in spu.progressbar(ds, step=FLAGS.batch_size):
             verts = batch['vertices'] / 1000
             joints = batch['joints'] / 1000
@@ -70,7 +66,7 @@ def main():
                 j_others_fitaligned = j_np[:, body_model.num_joints:] - j_np[:, :1] + j_fit[:, :1]
                 j_fit = np.concatenate([j_fit, j_others_fitaligned], axis=-2)
 
-                writer.write_frame(filename=filename, vertices=v_fit * 1000, joints=j_fit * 1000)
+                writer.append(filename=filename, vertices=v_fit * 1000, joints=j_fit * 1000)
 
                 if viz is not None:
                     im_filename = spu.replace_extension(filename, '.png')
@@ -99,7 +95,7 @@ def dataset_from_file(filepath, batch_size):
 
     def generator():
         ragged_tensor_names = ['vertices', 'joints', 'vertex_uncertainties', 'joint_uncertainties']
-        with Reader(filepath) as f:
+        with bodycompress.BodyDecompressor(filepath) as f:
             for frame_data in f:
                 out_frame_data = {}
                 for name in ragged_tensor_names:

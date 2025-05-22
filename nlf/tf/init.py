@@ -5,13 +5,10 @@ os.environ['KMP_INIT_AT_FORK'] = 'FALSE'
 os.environ['WANDB_SILENT'] = 'true'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
-# Patch the delete function on MLCloud to free up quota immediately
-# import mlcloud_monkey_patch_truncation
-# mlcloud_monkey_patch_truncation.patch_tf_delete()
-
 # Must import cv2 early
 # noinspection PyUnresolvedReferences
 import cv2
+
 #
 
 # Must import TF early due to problem with PyCharm debugger otherwise.
@@ -27,18 +24,21 @@ import matplotlib.pyplot as plt
 import simplepyutils as spu
 from simplepyutils import FLAGS, logger
 
-from nlf.tf import tfu, util
+from nlf.tf import tfu
+from nlf.common import util
 from posepile.paths import DATA_ROOT
 
 
-def initialize(args=None):
+def initialize(args=None, parent_parser=None):
     spu.argparse.initialize_with_logfiles(
-        get_parser(), logdir_root=f'{DATA_ROOT}/experiments', args=args)
-    print(FLAGS)
+        get_parser(parent_parser), logdir_root=f'{DATA_ROOT}/experiments', args=args
+    )
     logger.info(f'-- Starting --')
     logger.info(f'Host: {socket.gethostname()}')
     logger.info(f'Process id (pid): {os.getpid()}')
-    logger.info(f'Slurm job id: {os.environ.get("SLURM_JOB_ID")}')
+    slurm_job_id = os.getenv("SLURM_JOB_ID")
+    if slurm_job_id is not None:
+        logger.info(f'Slurm job id: {slurm_job_id}')
 
     if FLAGS.comment:
         logger.info(f'Comment: {FLAGS.comment}')
@@ -54,7 +54,8 @@ def initialize(args=None):
         FLAGS.checkpoint_dir = FLAGS.logdir
 
     FLAGS.checkpoint_dir = util.ensure_absolute_path(
-        FLAGS.checkpoint_dir, root=f'{DATA_ROOT}/experiments')
+        FLAGS.checkpoint_dir, root=f'{DATA_ROOT}/experiments'
+    )
     os.makedirs(FLAGS.checkpoint_dir, exist_ok=True)
 
     if not FLAGS.pred_path:
@@ -67,8 +68,6 @@ def initialize(args=None):
             FLAGS.load_path = osp.splitext(FLAGS.load_path)[0]
         FLAGS.load_path = util.ensure_absolute_path(FLAGS.load_path, FLAGS.checkpoint_dir)
 
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
     tf.keras.utils.set_random_seed(FLAGS.seed)
 
@@ -84,17 +83,27 @@ def initialize(args=None):
         FLAGS.stop_step = FLAGS.training_steps
 
 
-def get_parser():
+def get_parser(parent_parser=None):
+    parents = [parent_parser] if parent_parser else []
     parser = argparse.ArgumentParser(
-        description='Neural Localizer Fields for Continuous 3D Human Pose and Shape Estimation', allow_abbrev=False)
+        description='Neural Localizer Fields for Continuous 3D Human Pose and Shape Estimation',
+        allow_abbrev=False,
+        parents=parents,
+    )
 
     parser.add_argument('--comment', type=str, default=None)
-    parser.add_argument('--seed', type=int, default=1, help='Seed for the random number generators')
+    parser.add_argument(
+        '--seed', type=int, default=1, help='Seed for the random number generators'
+    )
     parser.add_argument('--wandb-project', type=str, default='localizerfield')
 
     # Parallelism
-    parser.add_argument('--workers', type=int, default=None,
-                        help='Number of parallel workers to run. Default is min(12, num_cpus)')
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=None,
+        help='Number of parallel workers to run. Default is min(12, num_cpus)',
+    )
     parser.add_argument('--multi-gpu', action=spu.argparse.BoolAction)
 
     # Task options (what to do)
@@ -104,37 +113,57 @@ def get_parser():
     parser.add_argument('--pred-path', type=str, default=None)
 
     # Monitoring options
-    parser.add_argument('--viz', action=spu.argparse.BoolAction,
-                        help='Create graphical user interface for visualization.')
+    parser.add_argument(
+        '--viz',
+        action=spu.argparse.BoolAction,
+        help='Create graphical user interface for visualization.',
+    )
 
     # Loading and input processing options
-    parser.add_argument('--load-path', type=str, default=None,
-                        help='Path of model checkpoint to load in the beginning.')
-    parser.add_argument('--checkpoint-dir', type=str, default=None,
-                        help='Directory path of model checkpoints.')
-    parser.add_argument('--init-path', type=str, default=None,
-                        help="""Path of the pretrained checkpoint to initialize from once
+    parser.add_argument(
+        '--load-path',
+        type=str,
+        default=None,
+        help='Path of model checkpoint to load in the beginning.',
+    )
+    parser.add_argument(
+        '--checkpoint-dir', type=str, default=None, help='Directory path of model checkpoints.'
+    )
+    parser.add_argument(
+        '--init-path',
+        type=str,
+        default=None,
+        help="""Path of the pretrained checkpoint to initialize from once
                         at the very start of training (i.e. not when resuming!).
-                        To restore for resuming an existing training use the --load-path option.""")
+                        To restore for resuming an existing training use the --load-path option.""",
+    )
     parser.add_argument('--load-backbone-from', type=str)
 
     # Augmentations, image preproc
-    parser.add_argument('--proc-side', type=int, default=256,
-                        help='Side length of image as processed by network.')
+    parser.add_argument(
+        '--proc-side', type=int, default=256, help='Side length of image as processed by network.'
+    )
 
-    parser.add_argument('--geom-aug', action=spu.argparse.BoolAction, default=True,
-                        help='Training data augmentations such as rotation, scaling, translation '
-                             'etc.')
+    parser.add_argument(
+        '--geom-aug',
+        action=spu.argparse.BoolAction,
+        default=True,
+        help='Training data augmentations such as rotation, scaling, translation ' 'etc.',
+    )
     parser.add_argument('--hflip-aug', action=spu.argparse.BoolAction, default=True)
-    parser.add_argument('--rot-aug', type=float,
-                        help='Rotation augmentation in degrees.', default=20)
+    parser.add_argument(
+        '--rot-aug', type=float, help='Rotation augmentation in degrees.', default=20
+    )
     parser.add_argument('--full-rot-aug-prob', type=float, default=0.1)
-    parser.add_argument('--scale-aug-up', type=float,
-                        help='Scale augmentation in percent.', default=25)
-    parser.add_argument('--scale-aug-down', type=float,
-                        help='Scale augmentation in percent.', default=25)
-    parser.add_argument('--shift-aug', type=float,
-                        help='Shift augmentation in percent.', default=10)
+    parser.add_argument(
+        '--scale-aug-up', type=float, help='Scale augmentation in percent.', default=25
+    )
+    parser.add_argument(
+        '--scale-aug-down', type=float, help='Scale augmentation in percent.', default=25
+    )
+    parser.add_argument(
+        '--shift-aug', type=float, help='Shift augmentation in percent.', default=10
+    )
 
     parser.add_argument('--occlude-aug-prob', type=float, default=0.5)
     parser.add_argument('--occlude-aug-prob-2d', type=float, default=0.7)
@@ -143,17 +172,19 @@ def get_parser():
     parser.add_argument('--color-aug', action=spu.argparse.BoolAction, default=True)
     parser.add_argument('--partial-visibility-prob', type=float, default=0.15)
     parser.add_argument('--jpeg-aug-prob', type=float, default=0.25)
-    parser.add_argument('--augment-border', action=spu.argparse.BoolAction)
+    parser.add_argument('--augment-border-prob', type=float, default=0)
     parser.add_argument('--border-value', type=int, default=0)
 
-    parser.add_argument('--test-aug', action=spu.argparse.BoolAction,
-                        help='Apply augmentations to test images.')
+    parser.add_argument(
+        '--test-aug', action=spu.argparse.BoolAction, help='Apply augmentations to test images.'
+    )
     parser.add_argument('--test-time-mirror-aug', action=spu.argparse.BoolAction)
 
     parser.add_argument('--antialias-train', type=int, default=1)
     parser.add_argument('--antialias-test', type=int, default=1)  # 4 can be more accurate
     parser.add_argument(
-        '--image-interpolation-train', type=str, default='linear')  # 'nearest' can be faster
+        '--image-interpolation-train', type=str, default='linear'
+    )  # 'nearest' can be faster
     parser.add_argument('--image-interpolation-test', type=str, default='linear')
 
     # Data choices for Human3.6M
@@ -167,14 +198,27 @@ def get_parser():
     parser.add_argument('--test-on', type=str, default='test', help='Test part.')
 
     # Training options
-    parser.add_argument('--dtype', type=str, default='float16',
-                        choices=['float16', 'float32', 'bfloat16'],
-                        help='The floating point type to use for computations.')
-    parser.add_argument('--data-format', type=str, default='NHWC',
-                        choices=['NHWC', 'NCHW'], help='Data format used internally.')
+    parser.add_argument(
+        '--dtype',
+        type=str,
+        default='float16',
+        choices=['float16', 'float32', 'bfloat16'],
+        help='The floating point type to use for computations.',
+    )
+    parser.add_argument(
+        '--data-format',
+        type=str,
+        default='NHWC',
+        choices=['NHWC', 'NCHW'],
+        help='Data format used internally.',
+    )
 
-    parser.add_argument('--validate-period', type=int, default=None,
-                        help='Periodically validate during training, every this many steps.')
+    parser.add_argument(
+        '--validate-period',
+        type=int,
+        default=None,
+        help='Periodically validate during training, every this many steps.',
+    )
     parser.add_argument('--checkpoint-period', type=int, default=2000)
 
     # Optimizer
@@ -185,22 +229,34 @@ def get_parser():
     parser.add_argument('--weight-decay', type=float, default=3e-3)
     parser.add_argument('--decay-field', action=spu.argparse.BoolAction)
 
-    parser.add_argument('--base-learning-rate', type=float, default=2.121e-4,
-                        help='Learning rate of the optimizer.')
+    parser.add_argument(
+        '--base-learning-rate',
+        type=float,
+        default=2.121e-4,
+        help='Learning rate of the optimizer.',
+    )
     parser.add_argument('--dual-finetune-lr', action=spu.argparse.BoolAction)
     parser.add_argument('--lr-cooldown-fraction', type=float, default=0.08)
     parser.add_argument('--backbone-lr-factor', type=float, default=0.15)
     parser.add_argument('--field-lr-factor', type=float, default=1)
 
+
     parser.add_argument('--loss-scale', type=float, default=128)
     parser.add_argument('--dynamic-loss-scale', action=spu.argparse.BoolAction)
-    parser.add_argument('--ema-momentum', type=float, default=1,
-                        help='The momentum of the exponential moving average in Polyak averaging.')
+    parser.add_argument(
+        '--ema-momentum',
+        type=float,
+        default=1,
+        help='The momentum of the exponential moving average in Polyak averaging.',
+    )
     parser.add_argument('--grad-accum-steps', type=int, default=1)
-    parser.add_argument('--force-grad-accum', action=spu.argparse.BoolAction,
-                        help='Use a GradientAccumulationOptimizer even when grad-accum-steps=1.'
-                             'Useful for being able to switch gradient accumulation on and off'
-                             'and have the checkpoints still work.')
+    parser.add_argument(
+        '--force-grad-accum',
+        action=spu.argparse.BoolAction,
+        help='Use a GradientAccumulationOptimizer even when grad-accum-steps=1.'
+        'Useful for being able to switch gradient accumulation on and off'
+        'and have the checkpoints still work.',
+    )
     parser.add_argument('--finetune-in-inference-mode', type=int, default=0)
     parser.add_argument('--constrain-kernel-norm', type=float, default=20)
     parser.add_argument('--constraint-rate', type=float, default=1)
@@ -211,7 +267,6 @@ def get_parser():
     parser.add_argument('--batch-size-parametric', type=int, default=64)
     parser.add_argument('--batch-size-densepose', type=int, default=20)
     parser.add_argument('--batch-size-2d', type=int, default=32)
-
 
     parser.add_argument('--stride-train', type=int, default=32)
     parser.add_argument('--stride-test', type=int, default=32)
@@ -225,10 +280,18 @@ def get_parser():
     parser.add_argument('--dataset-dense', type=str)
 
     # Model
-    parser.add_argument('--backbone', type=str, default='efficientnetv2-s',
-                        help='Backbone of the predictor network.')
-    parser.add_argument('--depth', type=int, default=8,
-                        help='Number of voxels along the z axis for volumetric prediction')
+    parser.add_argument(
+        '--backbone',
+        type=str,
+        default='efficientnetv2-s',
+        help='Backbone of the predictor network.',
+    )
+    parser.add_argument(
+        '--depth',
+        type=int,
+        default=8,
+        help='Number of voxels along the z axis for volumetric prediction',
+    )
     parser.add_argument('--box-size-m', type=float, default=2.2)
 
     parser.add_argument('--weak-perspective', action=spu.argparse.BoolAction)
@@ -240,6 +303,7 @@ def get_parser():
     parser.add_argument('--ghost-bn', type=str, default='')
     parser.add_argument('--batch-renorm', action=spu.argparse.BoolAction, default=True)
     parser.add_argument('--renorm-limit-scale', type=float, default=1)
+    parser.add_argument('--group-norm', action=spu.argparse.BoolAction)
 
 
     # Loss
@@ -279,12 +343,12 @@ def get_parser():
     parser.add_argument('--num-points', type=int, default=1024)
     parser.add_argument('--num-surface-points', type=int, default=640)
     parser.add_argument('--num-internal-points', type=int, default=384)
-    parser.add_argument('--trainable-canonical-joints', action=spu.argparse.BoolAction,
-                        default=True)
-
-    parser.add_argument('--more-onlyskel', action=spu.argparse.BoolAction)
+    parser.add_argument(
+        '--trainable-canonical-joints', action=spu.argparse.BoolAction, default=True
+    )
 
     parser.add_argument('--fix-uncert-factor', action=spu.argparse.BoolAction)
-
     parser.add_argument('--custom', type=str, default='')
+
+    parser.add_argument('--config-file', action=spu.argparse.ParseFromFileAction)
     return parser

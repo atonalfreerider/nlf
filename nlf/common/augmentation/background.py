@@ -1,14 +1,16 @@
 import functools
+import os.path as osp
 
+import barecat
 import cameralib
 import cv2
 import numpy as np
 import simplepyutils as spu
 from posepile.paths import DATA_ROOT
 from simplepyutils import FLAGS
-import barecat
-from nlf.tf import improc, util
-import os.path as osp
+
+from nlf.common import improc, util
+
 
 @functools.lru_cache()
 def get_inria_holiday_background_paths():

@@ -14,15 +14,24 @@ def get_cached_body_model(model_name, gender):
     return SMPLBodyModelMmap(model_name, gender)
 
 class SMPLBodyModelMmap:
-    def __init__(self, model_name='smpl', gender='neutral'):
+    def __init__(self, model_name='smpl', gender='neutral', num_betas=None):
         """
-        Args:
-            model_root: path to pickle files for the model (see https://smpl.is.tue.mpg.de).
-            gender: 'neutral' (default) or 'f' or 'm'
-            model_type: 'basic' or 'shapeagnostic' (the latter is designed to ignore any
-                influence from the shape betas except the influence on the joint locations,
-                i.e., it always yields average-BMI body shapes but allows changing the skeleton.)
+        Represents a statistical body model of the SMPL family.
+
+        The SMPL (Skinned Multi-Person Linear) model provides a way to represent articulated 3D
+        human
+        meshes through a compact shape vector (beta) and pose (body part rotation) parameters.
+
+        Parameters:
+            model_name: Name of the model type.
+            gender: Gender of the model, which can be 'neutral', 'female' or 'male'.
+            model_root: Path to the directory containing model files. By default,
+                {DATA_ROOT}/body_models/{model_name} is used, with the DATA_ROOT environment
+                variable.
+            num_betas: Number of shape parameters (betas) to use. By default, all available betas are
+                used.
         """
+
         self.gender = gender
         self.model_name = model_name
         gender = dict(f='female', n='neutral', m='male')[gender[0].lower()]
@@ -176,9 +185,9 @@ class SMPLBodyModelMmap:
             [mat2rotvec(new_rotmat), pose_rotvecs[3:]], axis=0)
 
         pelvis = (
-                         self.J_template[0] +
-                         self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
-                         self.kid_J_shapedir[0] * kid_factor
+                self.J_template[0] +
+                self.J_shapedirs[0, :, :shape_betas.shape[0]] @ shape_betas +
+                self.kid_J_shapedir[0] * kid_factor
                  )
 
         if post_translate:
@@ -205,24 +214,27 @@ def check_batch_size(pose_rotvecs, shape_betas, trans, rel_rotmats):
     return batch_sizes[0]
 
 
-def prepare(model_name, gender):
-    model = smplfitter.np.SMPLBodyModel(model_name, gender)
+def prepare(model_name, gender, num_betas):
+    model = smplfitter.np.BodyModel(model_name, gender)
     out_dir = f'{DATA_ROOT}/body_models/mmap/mmap_{model_name}_{gender}'
     os.makedirs(out_dir, exist_ok=True)
     for key in ['v_template', 'shapedirs', 'posedirs', 'J_regressor', 'J_template', 'J_shapedirs',
                 'kid_shapedir', 'kid_J_shapedir', 'weights', 'kintree_parents', 'faces']:
-        np.save(f'{out_dir}/{key}.npy', getattr(model, key))
+        val = getattr(model, key)
+        if key in ['shapedirs', 'J_shapedirs']:
+            val = val[:, :, :num_betas]
+        np.save(f'{out_dir}/{key}.npy', val)
 
 
-def prepare_all():
+def prepare_all(num_betas=128):
     for model_name in ['smpl', 'smplx', 'smplxlh', 'smplh16']:
         for gender in ['neutral', 'male', 'female']:
-            prepare(model_name, gender)
+            prepare(model_name, gender, num_betas)
 
     for model_name in ['smplh']:
         for gender in ['male', 'female']:
-            prepare(model_name, gender)
+            prepare(model_name, gender, num_betas)
 
 
 if __name__ == '__main__':
-    prepare_all()
+    prepare_all(num_betas=128)

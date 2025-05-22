@@ -1,4 +1,5 @@
 import functools
+from simplepyutils import rounded_int_tuple
 import itertools
 import os.path as osp
 import PIL.Image
@@ -6,12 +7,10 @@ import cv2
 import imageio
 import numba
 import numpy as np
-import rlemasklib
-import simplepyutils as spu
 from simplepyutils.argparse import logger
 from simplepyutils import FLAGS
 from posepile.paths import DATA_ROOT
-from nlf.tf import util
+from nlf.common import util
 import posepile.datasets3d as ds3d
 
 
@@ -31,9 +30,6 @@ def get_structuring_element(shape, ksize, anchor=None):
         ksize = (ksize, ksize)
     return cv2.getStructuringElement(shape, ksize, anchor)
 
-
-def rounded_int_tuple(p):
-    return tuple(np.round(p).astype(int))
 
 
 def image_extents(filepath):
@@ -79,13 +75,21 @@ def circle(im, center, radius, *args, **kwargs):
 
 
 def draw_stick_figure(
-        im, coords, joint_info, thickness=3, brightness_increase=0, color=None, joint_dots=True,
-        inplace=False):
+    im,
+    coords,
+    joint_info,
+    thickness=3,
+    brightness_increase=0,
+    color=None,
+    joint_dots=True,
+    inplace=False,
+):
     factor = 255 if np.issubdtype(im.dtype, np.floating) else 1
     if factor != 255 or not inplace:
         result_image = (im * factor).astype(np.uint8).copy()
         result_image = np.clip(
-            result_image.astype(np.float32) + brightness_increase, 0, 255).astype(np.uint8)
+            result_image.astype(np.float32) + brightness_increase, 0, 255
+        ).astype(np.uint8)
     else:
         result_image = im
 
@@ -98,30 +102,40 @@ def draw_stick_figure(
         relevant_coords = coords[[i_joint1, i_joint2]]
         if not np.isnan(relevant_coords).any() and not np.isclose(0, relevant_coords).any():
             line(
-                result_image, coords[i_joint1], coords[i_joint2], color=color, thickness=thickness,
-                lineType=cv2.LINE_AA)
+                result_image,
+                coords[i_joint1],
+                coords[i_joint2],
+                color=color,
+                thickness=thickness,
+                lineType=cv2.LINE_AA,
+            )
 
     if joint_dots:
         for i_joint, joint_name in enumerate(joint_info.names):
             if not np.isnan(coords[i_joint]).any():
                 circle(
-                    result_image, coords[i_joint], thickness * 1.2, color=(255, 0, 0),
-                    thickness=cv2.FILLED)
+                    result_image,
+                    coords[i_joint],
+                    thickness * 1.2,
+                    color=(255, 0, 0),
+                    thickness=cv2.FILLED,
+                )
 
     return result_image
 
 
-def normalize01(im, dst=None):
-    if dst is None:
-        result = np.empty_like(im, dtype=np.float32)
-    else:
-        result = dst
-    result[:] = im.astype(np.float32) / np.float32(255)
-    np.clip(result, np.float32(0), np.float32(1), out=result)
-    return result
+def normalize01(im):
+    return cv2.divide(im, (255, 255, 255, 255), dtype=cv2.CV_32F)
+    # if dst is None:
+    #    result = np.empty_like(im, dtype=np.float32)
+    # else:
+    #    result = dst
+    # result[:] = im.astype(np.float32) / np.float32(255)
+    # np.clip(result, np.float32(0), np.float32(1), out=result)
+    # return result
 
 
-@numba.jit(nopython=True)
+@numba.njit
 def blend_image_numba(im1, im2, im2_weight):
     return im1 * (1 - im2_weight) + im2 * im2_weight
 
@@ -129,7 +143,6 @@ def blend_image_numba(im1, im2, im2_weight):
 use_libjpeg_turbo = True
 if use_libjpeg_turbo:
     import jpeg4py
-
 
     def _imread(path, dst=None):
         lower = path.lower()
@@ -140,7 +153,9 @@ if use_libjpeg_turbo:
         except jpeg4py.JPEGRuntimeError:
             logger.error(f'Could not load image at {path}, JPEG error.')
             raise
+
 else:
+
     def _imread(path, dst=None):
         assert dst is None
         return imageio.v3.imread(path)
@@ -156,7 +171,7 @@ def imread(path, dst=None):
 
     if path.startswith(DATA_ROOT) and FLAGS.image_barecat_path is not None:
         try:
-            return ds3d.get_bc_images(FLAGS.image_barecat_path)[osp.relpath(path, DATA_ROOT)]
+            return ds3d.get_cached_reader(FLAGS.image_barecat_path)[osp.relpath(path, DATA_ROOT)]
         except Exception:
             pass
     return _imread(path, dst)[..., :3]
@@ -185,9 +200,7 @@ def paste_over(im_src, im_dst, alpha, center, inplace=False):
     width_height_src = np.array([im_src.shape[1], im_src.shape[0]], dtype=np.int32)
     width_height_dst = np.array([im_dst.shape[1], im_dst.shape[0]], dtype=np.int32)
 
-    center_float = center.astype(np.float32)
-    np.round(center_float, 0, center_float)
-    center_int = center_float.astype(np.int32)
+    center_int = np.rint(center.astype(np.float32)).astype(np.int32)
     ideal_start_dst = center_int - width_height_src // np.int32(2)
     ideal_end_dst = ideal_start_dst + width_height_src
 
@@ -200,20 +213,25 @@ def paste_over(im_src, im_dst, alpha, center, inplace=False):
     else:
         result = im_dst.copy()
 
-    region_dst = result[start_dst[1]:end_dst[1], start_dst[0]:end_dst[0]]
-
     start_src = start_dst - ideal_start_dst
     end_src = width_height_src + (end_dst - ideal_end_dst)
 
-    alpha_expanded = np.expand_dims(alpha, -1)
-    alpha_expanded = alpha_expanded[start_src[1]:end_src[1], start_src[0]:end_src[0]]
+    for y in range(start_src[1], end_src[1]):
+        for x in range(start_src[0], end_src[0]):
+            alpha_val = alpha[y, x]
+            if alpha_val > 0.0:
+                y_dst = y + start_dst[1] - start_src[1]
+                x_dst = x + start_dst[0] - start_src[0]
+                for c in range(3):
+                    current_dst_float = np.float32(result[y_dst, x_dst, c])
+                    new_val = current_dst_float + (im_src[y, x, c] - current_dst_float) * alpha_val
+                    if new_val < 0.0:
+                        new_val = 0.0
+                    elif new_val > 255.0:
+                        new_val = 255.0
+                    result[y_dst, x_dst, c] = np.uint8(new_val)
 
-    region_src = im_src[start_src[1]:end_src[1], start_src[0]:end_src[0]]
-
-    result[start_dst[1]:end_dst[1], start_dst[0]:end_dst[0]] = (
-        (alpha_expanded * region_src + (1 - alpha_expanded) * region_dst)).astype(np.uint8)
     return result
-
 
 def adjust_gamma(image, gamma, inplace=False):
     if inplace:
@@ -233,12 +251,11 @@ def blend_image(im1, im2, im2_weight):
         im2_weight = im2_weight[..., np.newaxis]
 
     return blend_image_numba(
-        im1.astype(np.float32),
-        im2.astype(np.float32),
-        im2_weight.astype(np.float32)).astype(im1.dtype)
+        im1.astype(np.float32), im2.astype(np.float32), im2_weight.astype(np.float32)
+    ).astype(im1.dtype)
 
 
-@numba.jit(nopython=True)
+@numba.njit
 def blend_image_numba(im1, im2, im2_weight):
     return im1 * (1 - im2_weight) + im2 * im2_weight
 
@@ -251,13 +268,23 @@ def is_image_readable(path):
         return False
 
 
+@numba.njit
+def _white_balance_lab(result, avg_a, avg_b):
+    factor_a = np.float32(1.1) / np.float32(255.0) * (avg_a - np.float32(128))
+    factor_b = np.float32(1.1) / np.float32(255.0) * (avg_b - np.float32(128))
+    for y in range(result.shape[0]):
+        for x in range(result.shape[1]):
+            l_float = np.float32(result[y, x, 0])
+            result[y, x, 1] -= np.uint8(l_float * factor_a)
+            result[y, x, 2] -= np.uint8(l_float * factor_b)
+    return result
+
 def white_balance(img, a=None, b=None):
     result = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
-    avg_a = a if a is not None else np.mean(result[..., 1])
-    avg_b = b if b is not None else np.mean(result[..., 2])
-    result[..., 1] = result[..., 1] - ((avg_a - 128) * (result[..., 0] / 255.0) * 1.1)
-    result[..., 2] = result[..., 2] - ((avg_b - 128) * (result[..., 0] / 255.0) * 1.1)
-    result = cv2.cvtColor(result, cv2.COLOR_LAB2RGB)
+    avg_a = a if a is not None else np.mean(result[..., 1], dtype=np.float32)
+    avg_b = b if b is not None else np.mean(result[..., 2], dtype=np.float32)
+    _white_balance_lab(result, np.float32(avg_a), np.float32(avg_b))
+    result = cv2.cvtColor(result, cv2.COLOR_LAB2RGB, dst=result)
     return result
 
 
@@ -275,29 +302,6 @@ def largest_connected_component(mask):
     return obj_mask, np.array(obj_box)
 
 
-def transform_video(inp_path, out_path, process_frame_fn, **kwargs):
-    spu.ensure_parent_dir_exists(out_path)
-    with imageio.get_reader(inp_path) as reader:
-        fps = reader.get_meta_data()['fps']
-        n_frames = num_frames_of_video(inp_path)
-        with imageio.get_writer(out_path, fps=fps, codec='h264', **kwargs) as writer:
-            for frame in spu.progressbar(reader, total=n_frames):
-                writer.append_data(process_frame_fn(frame))
-
-
-def num_frames_of_video(path):
-    with imageio.get_reader(path) as vid:
-        return vid.get_meta_data()['nframes']
-
-
-def mask_iou(mask1, mask2):
-    union = np.count_nonzero(np.logical_or(mask1, mask2))
-    if union == 0:
-        return 0
-    intersection = np.count_nonzero(np.logical_and(mask1, mask2))
-    return intersection / union
-
-
 def erode(mask, kernel_size, iterations=1):
     elem = get_structuring_element(cv2.MORPH_ELLIPSE, kernel_size)
     return cv2.morphologyEx(mask, cv2.MORPH_ERODE, elem, iterations=iterations)
@@ -308,32 +312,6 @@ def dilate(mask, kernel_size, iterations=1):
     return cv2.morphologyEx(mask, cv2.MORPH_DILATE, elem, iterations=iterations)
 
 
-def masks_to_label_map(masks):
-    h, w = masks.shape[1:3]
-    final_mask = np.zeros([h, w], np.uint8)
-    i_instance = 1
-    for mask in masks:
-        final_mask[mask > 0.5] = i_instance
-        i_instance += 1
-    return final_mask
-
-
-def outline(mask, d1=1, d2=3):
-    return dilate(mask, d2) - dilate(mask, d1)
-
-
-def fill_polygon(img, pts, color):
-    pts = pts.reshape((-1, 1, 2))
-    pts = np.round(pts).astype(np.int32)
-    cv2.fillPoly(img, [pts], color)
-
-
-def resize_mask(mask_encoded, new_imshape):
-    mask = rlemasklib.decode(mask_encoded) * 255
-    mask = cv2.resize(mask, (new_imshape[1], new_imshape[0]))
-    mask = (mask > 127).astype(np.uint8)
-    return rlemasklib.encode(mask)
-
 
 def get_inline(mask, d1=1, d2=3):
     if mask.dtype == bool:
@@ -341,17 +319,3 @@ def get_inline(mask, d1=1, d2=3):
     return erode(mask, d1) - erode(mask, d2)
 
 
-def draw_mask(img, mask, mask_color, draw_outline=True):
-    imcolor = img[mask > 0].astype(np.float64)
-    img[mask > 0] = np.clip(mask_color * 0.3 + imcolor * 0.7, 0, 255).astype(np.uint8)
-
-    if draw_outline:
-        outline = get_inline(mask > 0, 1, 5)
-        img[outline] = mask_color
-
-
-def video_audio_mux(vidpath_audiosource, vidpath_imagesource, out_video_path):
-    import ffmpeg
-    video = ffmpeg.input(vidpath_imagesource).video
-    audio = ffmpeg.input(vidpath_audiosource).audio
-    ffmpeg.output(audio, video, out_video_path, vcodec='copy', acodec='copy').run()

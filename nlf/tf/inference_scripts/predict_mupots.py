@@ -10,7 +10,7 @@ import tensorflow_hub as tfhub
 import tensorflow_inputs as tfinp
 from posepile.paths import DATA_ROOT
 from simplepyutils import FLAGS
-
+import nlf.matlabfile
 
 def initialize():
     parser = argparse.ArgumentParser()
@@ -22,8 +22,6 @@ def initialize():
     parser.add_argument('--internal-batch-size', type=int, default=128)
     parser.add_argument('--viz', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():
@@ -53,7 +51,7 @@ def main():
             if FLAGS.out_video_dir:
                 viz.new_sequence_output(f'{FLAGS.out_video_dir}/TS{i_seq}.mp4', fps=25)
 
-        annotations = metrabs_tf.matlabfile.load(
+        annotations = nlf.matlabfile.load(
             f'{DATA_ROOT}/mupots/TS{i_seq}/annot.mat')['annotations']
         camera = cameralib.Camera(
             intrinsic_matrix=intrinsic_matrices[f'TS{i_seq}'], world_up=(0, -1, 0))

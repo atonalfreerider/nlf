@@ -1,4 +1,3 @@
-import addict
 import fleras.exceptions
 import numpy as np
 import smplfitter.tf
@@ -14,16 +13,24 @@ class NLFTrainer(fleras.ModelTrainer):
         super().__init__(**kwargs)
         self.model = localizer_model
         self.body_model_kinds = [
-            ('smpl', 'female'), ('smpl', 'male'), ('smpl', 'neutral'),
-            ('smplh', 'female'), ('smplh', 'male'), ('smplx', 'female'), ('smplx', 'male'),
-            ('smplx', 'neutral'), ('smplxmoyo', 'female')]
+            ('smpl', 'female'),
+            ('smpl', 'male'),
+            ('smpl', 'neutral'),
+            ('smplh', 'female'),
+            ('smplh', 'male'),
+            ('smplx', 'female'),
+            ('smplx', 'male'),
+            ('smplx', 'neutral'),
+            ('smplxmoyo', 'female'),
+        ]
         self.body_models = {
-            (n, g): smplfitter.tf.SMPLBodyModel(model_name=n, gender=g)
-            for n, g in self.body_model_kinds}
+            (n, g): smplfitter.tf.BodyModel(model_name=n, gender=g, num_betas=128)
+            for n, g in self.body_model_kinds
+        }
 
     def prepare_inputs(self, inps, training):
         # FORWARD BODY MODELS ON GPU
-        inps = addict.Dict(inps)
+        inps = EasyDict(inps)
 
         # First we need to group the different body model types (smpl, smplh, smplx) and
         # genders together, so we can forward them in a batched way.
@@ -32,7 +39,8 @@ class NLFTrainer(fleras.ModelTrainer):
         # These selectors contain the indices where a certain body model appears in the batch
         # e.g. body_model_selectors['smpl', 'neutral'] == [0, 2, 5, 7, ...]
         body_model_selectors = {
-            (n, g): tf.where(inps.param.body_model == f'{n}_{g[0]}')[:, 0] for (n, g) in bm_kinds}
+            (n, g): tf.where(inps.param.body_model == f'{n}_{g[0]}')[:, 0] for (n, g) in bm_kinds
+        }
         # The permutation is the one needed to sort the batch so that all body models of the same
         # kind are grouped together.
         permutation = tf.concat([body_model_selectors[k] for k in bm_kinds], axis=0)
@@ -62,14 +70,15 @@ class NLFTrainer(fleras.ModelTrainer):
         def decode_points_for_body_model(k):
             bm = self.body_models[k]
             # We first forward the corresponding body model to get the vertices and joints
-            result = bm(pose[k][:, :bm.num_joints * 3], shape[k], trans[k], kid_factor[k])
+            result = bm(pose[k][:, : bm.num_joints * 3], shape[k], trans[k], kid_factor[k])
             # We concatenate the vertices and joints
             # (and scale them, which is not part of the body model definition, but some datasets
             # specify a scale factor for their fits, so we have to use it. AGORA's kid factor
             # is probably a better way.)
             verts_and_joints = (
-                    tf.concat([result['vertices'], result['joints']], axis=1) *
-                    scale[k][:, tf.newaxis, tf.newaxis])
+                tf.concat([result['vertices'], result['joints']], axis=1)
+                * scale[k][:, tf.newaxis, tf.newaxis]
+            )
 
             # The random internal and surface points of the current batch are specified by
             # nlf.tf.loading.parametric as vertex and joint weightings. The weights are
@@ -80,8 +89,11 @@ class NLFTrainer(fleras.ModelTrainer):
             # should learn to predict based on the image and the canonical points.
             # This function does the interpolation using CSR sparse representation.
             return interpolate_sparse(
-                verts_and_joints, interp_weights_indices[k], interp_weights_data[k],
-                interp_weights_dense_shape[k])
+                verts_and_joints,
+                interp_weights_indices[k],
+                interp_weights_data[k],
+                interp_weights_dense_shape[k],
+            )
 
         # We now put the GT points of the different body model kinds back together
         # in the original order before we sorted them according to body model type.
@@ -102,35 +114,44 @@ class NLFTrainer(fleras.ModelTrainer):
         # skeleton points for which we have trainable canonicals), we now need to pick out the ones
         # for which each example provides GT annotation. The idea is that each skeleton-based
         # example specifies *indices* into the global set of canonical points.
-        inps.kp3d.canonical_points = tf.concat([
-            tf.gather(canonical_locs, inps.kp3d.point_ids, axis=0),
-            inps.kp3d.canonical_points], axis=1)
-        inps.dense.canonical_points = tf.concat([
-            tf.gather(canonical_locs, inps.dense.point_ids, axis=0),
-            inps.dense.canonical_points], axis=1)
-        inps.kp2d.canonical_points = tf.concat([
-            tf.gather(canonical_locs, inps.kp2d.point_ids, axis=0),
-            inps.kp2d.canonical_points], axis=1)
+        inps.kp3d.canonical_points = tf.concat(
+            [tf.gather(canonical_locs, inps.kp3d.point_ids, axis=0), inps.kp3d.canonical_points],
+            axis=1,
+        )
+        inps.dense.canonical_points = tf.concat(
+            [tf.gather(canonical_locs, inps.dense.point_ids, axis=0), inps.dense.canonical_points],
+            axis=1,
+        )
+        inps.kp2d.canonical_points = tf.concat(
+            [tf.gather(canonical_locs, inps.kp2d.point_ids, axis=0), inps.kp2d.canonical_points],
+            axis=1,
+        )
 
         # STACKING AND SPLITTING
         # We have four different sub-batches corresponding to the different annotation categories.
         # For efficient handling, e.g. passing though the backbone network, we have to concat
         # them all.
-        inps.image = tf.concat([
-            inps.param.image,
-            inps.kp3d.image,
-            inps.dense.image,
-            inps.kp2d.image], axis=0)
-        inps.intrinsics = tf.concat([
-            inps.param.intrinsics,
-            inps.kp3d.intrinsics,
-            inps.dense.intrinsics,
-            inps.kp2d.intrinsics], axis=0)
-        inps.canonical_points = tf.concat([
-            inps.param.canonical_points,
-            inps.kp3d.canonical_points,
-            inps.dense.canonical_points,
-            inps.kp2d.canonical_points], axis=0)
+        inps.image = tf.concat(
+            [inps.param.image, inps.kp3d.image, inps.dense.image, inps.kp2d.image], axis=0
+        )
+        inps.intrinsics = tf.concat(
+            [
+                inps.param.intrinsics,
+                inps.kp3d.intrinsics,
+                inps.dense.intrinsics,
+                inps.kp2d.intrinsics,
+            ],
+            axis=0,
+        )
+        inps.canonical_points = tf.concat(
+            [
+                inps.param.canonical_points,
+                inps.kp3d.canonical_points,
+                inps.dense.canonical_points,
+                inps.kp2d.canonical_points,
+            ],
+            axis=0,
+        )
 
         # Some of the tensors are actually ragged tensors, which need to be converted to
         # dense tensors for efficient processing.
@@ -143,11 +164,15 @@ class NLFTrainer(fleras.ModelTrainer):
         inps.kp3d.point_validity = to_mask_tensor(inps.kp3d.coords3d_true)
         inps.dense.point_validity = to_mask_tensor(inps.dense.coords2d_true)
         inps.kp2d.point_validity = to_mask_tensor(inps.kp2d.coords2d_true)
-        inps.point_validity_mask = tf.concat([
-            inps.param.point_validity,
-            inps.kp3d.point_validity,
-            inps.dense.point_validity,
-            inps.kp2d.point_validity], axis=0)
+        inps.point_validity_mask = tf.concat(
+            [
+                inps.param.point_validity,
+                inps.kp3d.point_validity,
+                inps.dense.point_validity,
+                inps.kp2d.point_validity,
+            ],
+            axis=0,
+        )
 
         def to_tensor(x):
             return x.to_tensor(shape=[None, FLAGS.num_points, None])
@@ -157,19 +182,27 @@ class NLFTrainer(fleras.ModelTrainer):
         inps.dense.coords2d_true = to_tensor(inps.dense.coords2d_true)
         inps.kp2d.coords2d_true = to_tensor(inps.kp2d.coords2d_true)
 
-        inps.coords2d_true = tf.concat([
-            tfu3d.project_pose(inps.param.coords3d_true, inps.param.intrinsics),
-            tfu3d.project_pose(inps.kp3d.coords3d_true, inps.kp3d.intrinsics),
-            inps.dense.coords2d_true,
-            inps.kp2d.coords2d_true], axis=0)
+        inps.coords2d_true = tf.concat(
+            [
+                tfu3d.project_pose(inps.param.coords3d_true, inps.param.intrinsics),
+                tfu3d.project_pose(inps.kp3d.coords3d_true, inps.kp3d.intrinsics),
+                inps.dense.coords2d_true,
+                inps.kp2d.coords2d_true,
+            ],
+            axis=0,
+        )
 
         # Check if Z coord is larger than 1 mm. this will be used to filter out points behind the
         # the camera, which are not visible in the image, and should not be part of the loss.
-        is_in_front_true = tf.concat([
-            inps.param.coords3d_true[..., 2] > 0.001,
-            inps.kp3d.coords3d_true[..., 2] > 0.001,
-            tf.ones_like(inps.dense.coords2d_true[..., 0], dtype=tf.bool),
-            tf.ones_like(inps.kp2d.coords2d_true[..., 0], dtype=tf.bool)], axis=0)
+        is_in_front_true = tf.concat(
+            [
+                inps.param.coords3d_true[..., 2] > 0.001,
+                inps.kp3d.coords3d_true[..., 2] > 0.001,
+                tf.ones_like(inps.dense.coords2d_true[..., 0], dtype=tf.bool),
+                tf.ones_like(inps.kp2d.coords2d_true[..., 0], dtype=tf.bool),
+            ],
+            axis=0,
+        )
 
         # Check if the 2D GT points are within the field of view of the camera.
         # The border factor parameter is measured in terms of stride units of the backbone.
@@ -177,10 +210,9 @@ class NLFTrainer(fleras.ModelTrainer):
         # a stride inside the image border. This is because the network is not able to output
         # 2D coordinates at the border of the image.
         inps.is_within_fov_true = tf.logical_and(
-            tf.logical_and(
-                tfu3d.is_within_fov(inps.coords2d_true, 0.5),
-                inps.point_validity_mask),
-            is_in_front_true)
+            tf.logical_and(tfu3d.is_within_fov(inps.coords2d_true, 0.5), inps.point_validity_mask),
+            is_in_front_true,
+        )
         return inps
 
     def forward_train(self, inps, training):
@@ -193,14 +225,10 @@ class NLFTrainer(fleras.ModelTrainer):
             # 2) the canonical points' x coord is flipped (canonical_points * [-1, 1, 1]).
             # At the end the predictions will also be flipped back accordingly.
             flip_mask = tf.random.uniform([tf.shape(image)[0], 1, 1]) > 0.5
-            image = tf.where(
-                flip_mask[..., tf.newaxis],
-                tf.image.flip_left_right(image),
-                image)
+            image = tf.where(flip_mask[..., tf.newaxis], tf.image.flip_left_right(image), image)
             canonical_points = tf.where(
-                flip_mask,
-                canonical_points * tf.constant([-1, 1, 1], tf.float32),
-                canonical_points)
+                flip_mask, canonical_points * tf.constant([-1, 1, 1], tf.float32), canonical_points
+            )
 
             # Flipped or not, the image is passed through the backbone network.
             features = self.model.backbone(image, training=training)
@@ -211,18 +239,17 @@ class NLFTrainer(fleras.ModelTrainer):
             # The heatmap head (which contains the localizer field that dynamically constructs
             # the weights) now outputs the 2D and 3D predictions, as well as the uncertainties.
             head2d, head3d, uncertainties = self.model.heatmap_head(
-                features, canonical_points, training=training)
+                features, canonical_points, training=training
+            )
 
             # The results need to be flipped back if they were flipped for the input at the start
             # of this function.
-            head3d = tf.where(
-                flip_mask,
-                head3d * tf.constant([-1, 1, 1], tf.float32),
-                head3d)
+            head3d = tf.where(flip_mask, head3d * tf.constant([-1, 1, 1], tf.float32), head3d)
             head2d = tf.where(
                 flip_mask,
                 tf.concat([FLAGS.proc_side - 1 - head2d[..., :1], head2d[..., 1:]], axis=-1),
-                head2d)
+                head2d,
+            )
             return head2d, head3d, uncertainties
 
         head2d, head3d, uncertainties = backbone_and_head(inps.image, inps.canonical_points_tensor)
@@ -234,8 +261,8 @@ class NLFTrainer(fleras.ModelTrainer):
         # or translating the 3D points. The mix factor here is controlling the weighting of
         # these two options.
         mix_3d_inside_fov = (
-            tf.random.uniform([tf.shape(head3d)[0], 1, 1])
-            if training else FLAGS.mix_3d_inside_fov)
+            tf.random.uniform([tf.shape(head3d)[0], 1, 1]) if training else FLAGS.mix_3d_inside_fov
+        )
 
         # The reconstruction is only performed using those points that are within the field of
         # view according to the GT.
@@ -244,11 +271,13 @@ class NLFTrainer(fleras.ModelTrainer):
             # Furthermore, if we have reliable uncertainties (not too early in training)
             # then we also pick only those points where the uncertainty is below a certain
             # threshold.
-            is_early = (tf.cast(self.adjusted_train_counter(), tf.float32) <
-                        tf.cast(0.1 * FLAGS.training_steps, tf.float32))
+            is_early = tf.cast(self.adjusted_train_counter(), tf.float32) < tf.cast(
+                0.1 * FLAGS.training_steps, tf.float32
+            )
             validity = tf.logical_and(validity, tf.logical_or(is_early, uncertainties < 0.3))
         preds.coords3d_abs = self.reconstruct_absolute(
-            head2d, head3d, inps.intrinsics, mix_3d_inside_fov, validity)
+            head2d, head3d, inps.intrinsics, mix_3d_inside_fov, validity
+        )
 
         # SPLITTING
         # The prediction was more efficient to do in one big batch, but now
@@ -257,11 +286,16 @@ class NLFTrainer(fleras.ModelTrainer):
         # tensors again.
         batch_parts = [inps.param, inps.kp3d, inps.dense, inps.kp2d]
         batch_sizes = [tf.shape(p.image)[0] for p in batch_parts]
-        (preds.param.coords3d_abs, preds.kp3d.coords3d_abs, preds.dense.coords3d_abs,
-         preds.kp2d.coords3d_abs) = tf.split(preds.coords3d_abs, batch_sizes, axis=0)
+        (
+            preds.param.coords3d_abs,
+            preds.kp3d.coords3d_abs,
+            preds.dense.coords3d_abs,
+            preds.kp2d.coords3d_abs,
+        ) = tf.split(preds.coords3d_abs, batch_sizes, axis=0)
 
         preds.param.uncert, preds.kp3d.uncert, preds.dense.uncert, preds.kp2d.uncert = tf.split(
-            uncertainties, batch_sizes, axis=0)
+            uncertainties, batch_sizes, axis=0
+        )
 
         return preds
 
@@ -270,7 +304,8 @@ class NLFTrainer(fleras.ModelTrainer):
 
         # Parametric
         losses_parambatch, losses.loss_parambatch = self.compute_loss_with_3d_gt(
-            inps.param, preds.param)
+            inps.param, preds.param
+        )
         # We also store the individual component losses for each category to track them in
         # Weights and Biases (wandb).
         losses.loss_abs_param = losses_parambatch.loss3d_abs
@@ -292,12 +327,14 @@ class NLFTrainer(fleras.ModelTrainer):
         # AGGREGATE
         # The final loss is a weighted sum of the losses computed on the four different
         # training example categories.
-        losses.loss = tf.add_n([
-            FLAGS.loss_factor_param * losses.loss_parambatch,
-            FLAGS.loss_factor_kp * losses.loss_kpbatch,
-            FLAGS.loss_factor_dense * losses.loss_densebatch,
-            FLAGS.loss_factor_2d * losses.loss_2dbatch,
-        ])
+        losses.loss = tf.add_n(
+            [
+                FLAGS.loss_factor_param * losses.loss_parambatch,
+                FLAGS.loss_factor_kp * losses.loss_kpbatch,
+                FLAGS.loss_factor_dense * losses.loss_densebatch,
+                FLAGS.loss_factor_2d * losses.loss_2dbatch,
+            ]
+        )
 
         for name, value in losses.items():
             tf.debugging.assert_all_finite(value, f'Nonfinite {name}!')
@@ -316,7 +353,8 @@ class NLFTrainer(fleras.ModelTrainer):
         # We now compute a "center-relative" error, which is either root-relative
         # (if there is a root joint present), or mean-relative (i.e. the mean is subtracted).
         meanrel_diff = tfu3d.center_relative_pose(
-            diff, joint_validity_mask=inps.point_validity, center_is_mean=True)
+            diff, joint_validity_mask=inps.point_validity, center_is_mean=True
+        )
         # root_index is a [batch_size] int tensor that holds which one is the root
         # diff is [batch_size, joint_cound, 3]
         # we now need to select the root joint from each batch element
@@ -327,27 +365,34 @@ class NLFTrainer(fleras.ModelTrainer):
         # and root_index has shape N
         # and we want to select the root joint from each batch element
         sanitized_root_index = tf.where(
-            inps.root_index == -1, tf.zeros_like(inps.root_index), inps.root_index)
-        root_diff = tf.expand_dims(tf.gather_nd(diff, tf.stack(
-            [tf.range(tf.shape(diff)[0]), sanitized_root_index], axis=1)), axis=1)
+            inps.root_index == -1, tf.zeros_like(inps.root_index), inps.root_index
+        )
+        root_diff = tf.expand_dims(
+            tf.gather_nd(
+                diff, tf.stack([tf.range(tf.shape(diff)[0]), sanitized_root_index], axis=1)
+            ),
+            axis=1,
+        )
 
         rootrel_diff = diff - root_diff
         # Some elements of the batch do not have a root joint, which is marked as -1 as root_index.
         center_relative_diff = tf.where(
-            inps.root_index[:, tf.newaxis, tf.newaxis] == -1, meanrel_diff, rootrel_diff)
+            inps.root_index[:, tf.newaxis, tf.newaxis] == -1, meanrel_diff, rootrel_diff
+        )
 
         losses.loss3d = tfu.reduce_mean_masked(
-            self.my_norm(center_relative_diff, preds.uncert), inps.point_validity)
+            self.my_norm(center_relative_diff, preds.uncert), inps.point_validity
+        )
 
         # ABSOLUTE 3D LOSS (camera-space)
         absdiff = tf.abs(diff)
 
         # Since the depth error will naturally scale linearly with distance, we scale the z-error
         # down to the level that we would get if the person was 5 m away.
-        scale_factor_for_far = tf.minimum(
-            np.float32(1), 5 / tf.abs(inps.coords3d_true[..., 2:]))
+        scale_factor_for_far = tf.minimum(np.float32(1), 5 / tf.abs(inps.coords3d_true[..., 2:]))
         absdiff_scaled = tf.concat(
-            [absdiff[..., :2], absdiff[..., 2:] * scale_factor_for_far], axis=-1)
+            [absdiff[..., :2], absdiff[..., 2:] * scale_factor_for_far], axis=-1
+        )
 
         # There are numerical difficulties for points too close to the camera, so we only
         # apply the absolute loss for points at least 30 cm away from the camera.
@@ -361,8 +406,8 @@ class NLFTrainer(fleras.ModelTrainer):
         # self-gating mechanism, and the actual value of it is less important
         # compared to the relative values between different points.
         losses.loss3d_abs = tfu.reduce_mean_masked(
-            self.my_norm(absdiff_scaled, preds.uncert * 4.),
-            is_valid_and_far_enough)
+            self.my_norm(absdiff_scaled, preds.uncert * 4.0), is_valid_and_far_enough
+        )
 
         # 2D PROJECTION LOSS (pixel-space)
         # We also compute a loss in pixel space to encourage good image-alignment in the model.
@@ -372,7 +417,7 @@ class NLFTrainer(fleras.ModelTrainer):
         # Balance factor which considers the 2D image size equivalent to the 3D box size of the
         # volumetric heatmap. This is just a factor to get a rough ballpark.
         # It could be tuned further.
-        scale_2d = 1 / FLAGS.proc_side * FLAGS.box_size_m
+        scale_2d = 1 / FLAGS.proc_side * 2.2
 
         # We only use the 2D loss for points that are in front of the camera and aren't
         # very far out of the field of view. It's not a problem that the point is outside
@@ -382,39 +427,45 @@ class NLFTrainer(fleras.ModelTrainer):
         # reconstruction.
         is_in_fov_pred = tf.logical_and(
             tfu3d.is_within_fov(coords2d_pred, border_factor=-20 * (FLAGS.proc_side / 256)),
-            preds.coords3d_abs[..., 2] > 0.001)
+            preds.coords3d_abs[..., 2] > 0.001,
+        )
         is_near_fov_true = tf.logical_and(
             tfu3d.is_within_fov(coords2d_true, border_factor=-20 * (FLAGS.proc_side / 256)),
-            inps.coords3d_true[..., 2] > 0.001)
+            inps.coords3d_true[..., 2] > 0.001,
+        )
         losses.loss2d = tfu.reduce_mean_masked(
             self.my_norm((coords2d_true - coords2d_pred) * scale_2d, preds.uncert),
             tf.logical_and(
-                is_valid_and_far_enough,
-                tf.logical_and(is_in_fov_pred, is_near_fov_true)))
+                is_valid_and_far_enough, tf.logical_and(is_in_fov_pred, is_near_fov_true)
+            ),
+        )
 
-        return losses, tf.add_n([
-            losses.loss3d,
-            losses.loss2d,
-            FLAGS.absloss_factor * self.stop_grad_before_step(
-                losses.loss3d_abs, FLAGS.absloss_start_step)])
+        return losses, tf.add_n(
+            [
+                losses.loss3d,
+                losses.loss2d,
+                FLAGS.absloss_factor
+                * self.stop_grad_before_step(losses.loss3d_abs, FLAGS.absloss_start_step),
+            ]
+        )
 
     def compute_loss_with_2d_gt(self, inps, preds):
-        scale_2d = 1 / FLAGS.proc_side * FLAGS.box_size_m
+        scale_2d = 1 / FLAGS.proc_side * 2.2
         coords2d_pred = tfu3d.project_pose(preds.coords3d_abs, inps.intrinsics)
 
         is_in_fov_pred2d = tfu3d.is_within_fov(
-            coords2d_pred,
-            border_factor=-20 * (FLAGS.proc_side / 256))
+            coords2d_pred, border_factor=-20 * (FLAGS.proc_side / 256)
+        )
         is_near_fov_true2d = tfu3d.is_within_fov(
-            inps.coords2d_true,
-            border_factor=-20 * (FLAGS.proc_side / 256))
+            inps.coords2d_true, border_factor=-20 * (FLAGS.proc_side / 256)
+        )
 
         return tfu.reduce_mean_masked(
-            self.my_norm(
-                (inps.coords2d_true - coords2d_pred) * scale_2d, preds.uncert),
+            self.my_norm((inps.coords2d_true - coords2d_pred) * scale_2d, preds.uncert),
             tf.logical_and(
-                tf.logical_and(is_in_fov_pred2d, is_near_fov_true2d),
-                inps.point_validity))
+                tf.logical_and(is_in_fov_pred2d, is_near_fov_true2d), inps.point_validity
+            ),
+        )
 
     def compute_metrics(self, inps, preds, training):
         metrics = EasyDict()
@@ -423,8 +474,7 @@ class NLFTrainer(fleras.ModelTrainer):
             return metrics_parambatch
 
         metrics_kp = self.compute_metrics_with_3d_gt(inps.kp3d, preds.kp3d, '_kp')
-        metrics_dense = self.compute_metrics_with_2d_gt(
-            inps.dense, preds.dense, '_dense')
+        metrics_dense = self.compute_metrics_with_2d_gt(inps.dense, preds.dense, '_dense')
         metrics_2d = self.compute_metrics_with_2d_gt(inps.kp2d, preds.kp2d, '_2d')
 
         metrics.update(**metrics_parambatch, **metrics_kp, **metrics_dense, **metrics_2d)
@@ -435,12 +485,16 @@ class NLFTrainer(fleras.ModelTrainer):
         diff = inps.coords3d_true - preds.coords3d_abs
 
         # ABSOLUTE
-        metrics['mean_error_abs' + suffix] = tfu.reduce_mean_masked(
-            tf.norm(diff, axis=-1), inps.point_validity) * 1000
+        metrics['mean_error_abs' + suffix] = (
+            tfu.reduce_mean_masked(tf.norm(diff, axis=-1), inps.point_validity) * 1000
+        )
 
         # RELATIVE
-        meanrel_absdiff = tf.abs(tfu3d.center_relative_pose(
-            diff, joint_validity_mask=inps.point_validity, center_is_mean=True))
+        meanrel_absdiff = tf.abs(
+            tfu3d.center_relative_pose(
+                diff, joint_validity_mask=inps.point_validity, center_is_mean=True
+            )
+        )
         dist = tf.norm(meanrel_absdiff, axis=-1)
         metrics['mean_error' + suffix] = tfu.reduce_mean_masked(dist, inps.point_validity) * 1000
 
@@ -453,18 +507,23 @@ class NLFTrainer(fleras.ModelTrainer):
 
         # PROCRUSTES
         coords3d_pred_procrustes = tfu3d.rigid_align(
-            preds.coords3d_abs, inps.coords3d_true, joint_validity_mask=inps.point_validity,
-            scale_align=True)
+            preds.coords3d_abs,
+            inps.coords3d_true,
+            joint_validity_mask=inps.point_validity,
+            scale_align=True,
+        )
         dist_procrustes = tf.norm(coords3d_pred_procrustes - inps.coords3d_true, axis=-1)
-        metrics['mean_error_procrustes' + suffix] = tfu.reduce_mean_masked(
-            dist_procrustes, inps.point_validity) * 1000
+        metrics['mean_error_procrustes' + suffix] = (
+            tfu.reduce_mean_masked(dist_procrustes, inps.point_validity) * 1000
+        )
 
         # PROJECTION
         coords2d_pred = tfu3d.project_pose(preds.coords3d_abs, inps.intrinsics)
         coords2d_true = tfu3d.project_pose(inps.coords3d_true, inps.intrinsics)
         scale = 256 / FLAGS.proc_side
         metrics['mean_error_px' + suffix] = tfu.reduce_mean_masked(
-            tf.norm((coords2d_true - coords2d_pred) * scale, axis=-1), inps.point_validity)
+            tf.norm((coords2d_true - coords2d_pred) * scale, axis=-1), inps.point_validity
+        )
 
         return metrics
 
@@ -473,7 +532,8 @@ class NLFTrainer(fleras.ModelTrainer):
         scale = 256 / FLAGS.proc_side
         coords2d_pred = tfu3d.project_pose(preds.coords3d_abs, inps.intrinsics)
         metrics['mean_error_px' + suffix] = tfu.reduce_mean_masked(
-            tf.norm((inps.coords2d_true - coords2d_pred) * scale, axis=-1), inps.point_validity)
+            tf.norm((inps.coords2d_true - coords2d_pred) * scale, axis=-1), inps.point_validity
+        )
         return metrics
 
     def my_norm(self, x, uncert=None):
@@ -482,37 +542,47 @@ class NLFTrainer(fleras.ModelTrainer):
 
         if FLAGS.nll_loss:
             dim = tf.cast(tf.shape(x)[-1], tf.float32)
-            beta_comp_factor = tf.stop_gradient(
-                uncert) ** FLAGS.beta_nll if FLAGS.beta_nll else 1
+            beta_comp_factor = tf.stop_gradient(uncert) ** FLAGS.beta_nll if FLAGS.beta_nll else 1
 
             factor = tf.math.rsqrt(dim) if FLAGS.fix_uncert_factor else tf.math.sqrt(dim)
-            return (tfu.charbonnier(
-                x / tf.expand_dims(uncert, -1),
-                epsilon=FLAGS.charb_eps, axis=-1) + factor * tf.math.log(
-                uncert)) * beta_comp_factor
+            return (
+                tfu.charbonnier(x / tf.expand_dims(uncert, -1), epsilon=FLAGS.charb_eps, axis=-1)
+                + factor * tf.math.log(uncert)
+            ) * beta_comp_factor
         else:
             return tfu.charbonnier(x, epsilon=FLAGS.charb_eps, axis=-1)  # +
-
-    def my_euc_norm(self, x):
-        dim = tf.cast(tf.shape(x)[-1], tf.float32)
-        norm = tfu.reduce_euclidean(x, keepdims=True) * tf.math.rsqrt(dim)
-        return norm
 
     def adjusted_train_counter(self):
         return self.train_counter // FLAGS.grad_accum_steps
 
     def reconstruct_absolute(
-            self, head2d, head3d, intrinsics, mix_3d_inside_fov, point_validity_mask=None):
+        self, head2d, head3d, intrinsics, mix_3d_inside_fov, point_validity_mask=None
+    ):
         return tf.cond(
             self.adjusted_train_counter() < 500,
             lambda: tfu3d.reconstruct_absolute(
-                head2d, head3d, intrinsics, mix_3d_inside_fov=mix_3d_inside_fov,
-                weak_perspective=True, point_validity_mask=point_validity_mask,
-                border_factor1=1, border_factor2=0.55, mix_based_on_3d=False),
+                head2d,
+                head3d,
+                intrinsics,
+                mix_3d_inside_fov=mix_3d_inside_fov,
+                weak_perspective=True,
+                point_validity_mask=point_validity_mask,
+                border_factor1=1,
+                border_factor2=0.55,
+                mix_based_on_3d=False,
+            ),
             lambda: tfu3d.reconstruct_absolute(
-                head2d, head3d, intrinsics, mix_3d_inside_fov=mix_3d_inside_fov,
-                weak_perspective=False, point_validity_mask=point_validity_mask,
-                border_factor1=1, border_factor2=0.55, mix_based_on_3d=False))
+                head2d,
+                head3d,
+                intrinsics,
+                mix_3d_inside_fov=mix_3d_inside_fov,
+                weak_perspective=False,
+                point_validity_mask=point_validity_mask,
+                border_factor1=1,
+                border_factor2=0.55,
+                mix_based_on_3d=False,
+            ),
+        )
 
     def stop_grad_before_step(self, x, step):
         if self.adjusted_train_counter() >= step:
@@ -536,6 +606,7 @@ def interpolate_sparse(source_points, indices, data, dense_shape):
     stacked_sparse_weights_csr = tf.raw_ops.SparseTensorToCSRSparseMatrix(
         indices=tf.cast(stacked_indices, tf.int64),
         values=stacked_values,
-        dense_shape=tf.cast(stacked_shape, tf.int64))
+        dense_shape=tf.cast(stacked_shape, tf.int64),
+    )
     result = tf.raw_ops.SparseMatrixMatMul(a=stacked_sparse_weights_csr, b=source_points)
     return tf.stop_gradient(result)

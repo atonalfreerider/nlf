@@ -735,6 +735,7 @@ def get_model(model_name,
     if pretrained_ckpt and not FLAGS.batch_renorm:
         if tf.io.gfile.isdir(pretrained_ckpt):
             pretrained_ckpt = tf.train.latest_checkpoint(pretrained_ckpt)
+        print('loading')
         net.load_weights(pretrained_ckpt)
     net.rng = tf.random.get_global_generator()
 

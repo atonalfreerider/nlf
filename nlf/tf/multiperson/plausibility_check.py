@@ -1,9 +1,5 @@
-import posepile.datasets3d as ds3d
-import simplepyutils as spu
 import tensorflow as tf
-from simplepyutils import FLAGS
 
-from nlf.tf import util3d
 
 def pose_non_max_suppression(poses, scores, is_pose_valid):
     plausible_indices_single_frame = tf.squeeze(tf.where(is_pose_valid), 1)
@@ -11,8 +7,11 @@ def pose_non_max_suppression(poses, scores, is_pose_valid):
     plausible_scores = tf.gather(scores, plausible_indices_single_frame)
     similarity_matrix = compute_pose_similarity(plausible_poses)
     nms_indices = tf.image.non_max_suppression_overlaps(
-        overlaps=similarity_matrix, scores=plausible_scores,
-        max_output_size=150, overlap_threshold=0.4)
+        overlaps=similarity_matrix,
+        scores=plausible_scores,
+        max_output_size=150,
+        overlap_threshold=0.4,
+    )
     return tf.cast(tf.gather(plausible_indices_single_frame, nms_indices), tf.int32)
 
 
@@ -23,7 +22,7 @@ def are_augmentation_results_consistent(stdevs):
 
 
 def is_uncertainty_low(uncerts):
-    return tf.reduce_mean(tf.cast(uncerts < 0.25, tf.float32), axis=-1) > 1/3
+    return tf.reduce_mean(tf.cast(uncerts < 0.25, tf.float32), axis=-1) > 1 / 3
 
 
 def compute_pose_similarity(poses):

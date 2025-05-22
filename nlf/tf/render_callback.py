@@ -30,10 +30,12 @@ class RenderPredictionCallback(tf.keras.callbacks.Callback):
         self.canonical_points = tf.constant(
             np.load(f'{PROJDIR}/canonical_vertices_smplx.npy'), tf.float32)
         self.faces = np.load(f'{PROJDIR}/smplx_faces.npy')
-        self.q = multiprocessing.Queue(10)
+        self.q = multiprocessing.JoinableQueue(10)
         self.renderer_process = multiprocessing.Process(
             target=smpl_render_loop,
-            args=(self.q, self.image_stack_np, self.camera, self.faces, FLAGS.logdir))
+            args=(self.q, self.image_stack_np, self.camera, self.faces, FLAGS.logdir),
+            daemon=True
+        )
         self.renderer_process.start()
         self.start_step = start_step
         self.interval = interval
@@ -48,15 +50,18 @@ class RenderPredictionCallback(tf.keras.callbacks.Callback):
 
     def on_train_end(self, logs=None):
         self.q.put(None)
-        self.renderer_process.join()
+        self.q.join()
+        #self.renderer_process.join()
 
     def __del__(self):
         if self.renderer_process.is_alive():
             self.q.put(None)
-            self.renderer_process.join()
+            self.q.join()
+            #self.renderer_process.join()
 
 
 def smpl_render_loop(q, image_stack, camera, faces, logdir):
+    spu.terminate_on_parent_death()  # maybe not needed with daemon=True
     renderer = Renderer(imshape=(512, 512), faces=faces)
     # import wandb
     # id_path = f'{logdir}/run_id'
@@ -67,17 +72,23 @@ def smpl_render_loop(q, image_stack, camera, faces, logdir):
     image_stack = np.array(
         [cv2.resize(im, (512, 512), interpolation=cv2.INTER_CUBIC) for im in image_stack])
 
-    while (elem := q.get()) is not None:
-        batch, pred_vertices = elem
-        triplets = [
-            make_triplet(im, verts, renderer, camera)
-            for im, verts in zip(image_stack, pred_vertices)]
-        grid = np.concatenate(
-            [np.concatenate(triplets[:3], axis=1),
-             np.concatenate(triplets[3:6], axis=1),
-             np.concatenate(triplets[6:9], axis=1)], axis=0)
-        path = f'{logdir}/pred_{batch:07d}.jpg'
-        imageio.imwrite(path, grid, quality=93)
+    while True:
+        elem = q.get()
+        if elem is not None:
+            batch, pred_vertices = elem
+            triplets = [
+                make_triplet(im, verts, renderer, camera)
+                for im, verts in zip(image_stack, pred_vertices)]
+            grid = np.concatenate(
+                [np.concatenate(triplets[:3], axis=1),
+                 np.concatenate(triplets[3:6], axis=1),
+                 np.concatenate(triplets[6:9], axis=1)], axis=0)
+            path = f'{logdir}/pred_{batch:07d}.jpg'
+            imageio.imwrite(path, grid, quality=93)
+
+        q.task_done()
+        if elem is None:
+            break
         # wandb.log({'preds': wandb.Image(path)}, step=batch)
 
 

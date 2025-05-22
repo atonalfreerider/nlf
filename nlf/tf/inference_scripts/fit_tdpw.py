@@ -3,9 +3,7 @@ import os.path as osp
 
 import numpy as np
 import simplepyutils as spu
-import smpl.numpy
-import smpl.tensorflow.fitting
-import smpl.tensorflow.full_fitting
+import smplfitter.tf
 import tensorflow as tf
 from simplepyutils import FLAGS
 
@@ -23,13 +21,11 @@ def initialize():
     parser.add_argument('--num-iter', type=int, default=3)
     parser.add_argument('--testset-only', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():
     initialize()
-    fit_fn = smpl.tensorflow.get_fit_fn(
+    fit_fn = smplfitter.tf.get_fit_fn(
         'smpl', 'neutral', num_betas=FLAGS.num_betas, enable_kid=False,
         weighted=True, l2_regularizer=FLAGS.l2_regul, l2_regularizer2=FLAGS.l2_regul2,
         num_iter=FLAGS.num_iter, final_adjust_rots=True)

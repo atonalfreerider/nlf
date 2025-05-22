@@ -1,10 +1,8 @@
-import warnings
-
 import numpy as np
 # noinspection PyUnresolvedReferences
 from mpl_toolkits.mplot3d import Axes3D
 
-from nlf.tf import procrustes
+from nlf.common import procrustes
 from simplepyutils import logger
 
 

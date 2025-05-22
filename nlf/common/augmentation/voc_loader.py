@@ -9,7 +9,7 @@ import numpy as np
 import simplepyutils as spu
 from posepile.paths import DATA_ROOT
 
-from nlf.tf import improc
+from nlf.common import improc
 
 
 @functools.lru_cache()

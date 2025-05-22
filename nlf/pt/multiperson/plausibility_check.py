@@ -1,8 +1,4 @@
-import posepile.datasets3d as ds3d
-import posepile.joint_info
-import simplepyutils as spu
 import torch
-from simplepyutils import FLAGS
 
 
 def pose_non_max_suppression(poses, scores, is_pose_valid):
@@ -11,8 +7,8 @@ def pose_non_max_suppression(poses, scores, is_pose_valid):
     plausible_scores = scores[plausible_indices_single_frame]
     similarity_matrix = compute_pose_similarity(plausible_poses)
     nms_indices = non_max_suppression_overlaps(
-        overlaps=similarity_matrix, scores=plausible_scores,
-        overlap_threshold=0.4)
+        overlaps=similarity_matrix, scores=plausible_scores, overlap_threshold=0.4
+    )
     return plausible_indices_single_frame[nms_indices]
 
 
@@ -77,7 +73,8 @@ def point_stdev(poses, item_dim, coord_dim):
 
 
 def non_max_suppression_overlaps(
-        overlaps: torch.Tensor, scores: torch.Tensor, overlap_threshold: float):
+    overlaps: torch.Tensor, scores: torch.Tensor, overlap_threshold: float
+):
     n_items = overlaps.shape[0]
     if n_items == 0:
         return torch.zeros(0, dtype=torch.int32, device=overlaps.device)

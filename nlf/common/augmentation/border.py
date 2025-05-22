@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from simplepyutils import FLAGS
 
 
 def augment_border(im, border_value, rng):
@@ -11,7 +10,7 @@ def augment_border(im, border_value, rng):
     size = 0.08
     angle = np.deg2rad(8)
 
-    def get_angle():
+    def random_angle():
         if rng.uniform(0, 1) < 0.9:
             return rng.uniform(-angle, angle)
         else:
@@ -19,7 +18,7 @@ def augment_border(im, border_value, rng):
 
     # top:
     if rng.uniform(0, 1) < p:
-        alpha = get_angle()
+        alpha = random_angle()
         d = rng.uniform(0, h * size)
         y1 = - np.tan(alpha) * h / 2 + d
         y2 = + np.tan(alpha) * h / 2 + d
@@ -30,7 +29,7 @@ def augment_border(im, border_value, rng):
 
     # bottom:
     if rng.uniform(0, 1) < p:
-        alpha = get_angle()
+        alpha = random_angle()
         d = rng.uniform(0, h * size)
         y1 = h - np.tan(alpha) * h / 2 - d
         y2 = h + np.tan(alpha) * h / 2 - d
@@ -41,7 +40,7 @@ def augment_border(im, border_value, rng):
 
     # left:
     if rng.uniform(0, 1) < p:
-        alpha = get_angle()
+        alpha = random_angle()
         d = rng.uniform(0, w * size)
         x1 = - np.tan(alpha) * w / 2 + d
         x2 = + np.tan(alpha) * w / 2 + d
@@ -52,7 +51,7 @@ def augment_border(im, border_value, rng):
 
     # right:
     if rng.uniform(0, 1) < p:
-        alpha = get_angle()
+        alpha = random_angle()
         d = rng.uniform(0, w * size)
         x1 = w - np.tan(alpha) * w / 2 - d
         x2 = w + np.tan(alpha) * w / 2 - d

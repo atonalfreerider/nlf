@@ -6,13 +6,15 @@ import scipy.optimize
 import scipy.stats.qmc
 import simplepyutils as spu
 import trimesh
-from smplfitter.np import SMPLBodyModel as SMPL_np, SMPLFitter as SMPLFitter_np
-from smplfitter.pt.converter import load_vertex_converter_csr
+from smplfitter.np import BodyFitter as BodyFitter_np, BodyModel as BodyModel_np
+from smplfitter.pt.bodyconverter import load_vertex_converter_csr
 
 from nlf.paths import DATA_ROOT, PROJDIR
 
+
 def save(path, obj):
     np.save(path, obj)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -38,49 +40,55 @@ def main():
         maybe_x = 'x' if args.body_model.startswith('smplx') else ''
         canonical_verts = np.load(f'{PROJDIR}/canonical_vertices_smpl{maybe_x}.npy')
         g0 = args.gender[0]
-        body_model = SMPL_np(args.body_model, args.gender)
+        body_model = BodyModel_np(args.body_model, args.gender)
 
         if args.save_canonical_joints:
             canonical_joints, canonical_joints_144 = get_canonical_joints(
-                body_model, canonical_verts)
+                body_model, canonical_verts
+            )
             save(f'{PROJDIR}/canonical_joints_{args.body_model}_{g0}.npy', canonical_joints)
 
             if canonical_joints_144 is not None:
-                save(f'{PROJDIR}/canonical_joints_{args.body_model}_{g0}_144.npy',
-                     canonical_joints_144)
+                save(
+                    f'{PROJDIR}/canonical_joints_{args.body_model}_{g0}_144.npy',
+                    canonical_joints_144,
+                )
 
         if args.save_internal_regressor:
             canonical_internal_points = np.load(f'{PROJDIR}/canonical_internal_points_smpl.npy')
             canonical_joints = np.load(f'{PROJDIR}/canonical_joints_{args.body_model}_{g0}.npy')
             internal_regressor = get_internal_regressor(
-                body_model, canonical_verts, canonical_joints, canonical_internal_points)
-            save_csr(f'{PROJDIR}/internal_regressor_{args.body_model}_{g0}.csr',
-                     internal_regressor)
+                body_model, canonical_verts, canonical_joints, canonical_internal_points
+            )
+            save_csr(
+                f'{PROJDIR}/internal_regressor_{args.body_model}_{g0}.csr', internal_regressor
+            )
 
 
 def save_canonical_verts():
-    body_model = SMPL_np('smpl', 'neutral')
+    body_model = BodyModel_np('smpl', 'neutral')
     stretched = body_model.single(pose_rotvecs=get_canonical_pose()[np.newaxis])
     verts = stretched['vertices']
     canonical_vertices_smpl = symmetrize_verts(verts)
     save(f'{PROJDIR}/canonical_vertices_smpl.npy', canonical_vertices_smpl)
 
     smpl2smplx_csr = load_vertex_converter_csr(
-        f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl')
+        f'{DATA_ROOT}/body_models/smpl2smplx_deftrafo_setup.pkl'
+    )
     canonical_vertices_smplx = smpl2smplx_csr @ canonical_vertices_smpl
     save(f'{PROJDIR}/canonical_vertices_smplx.npy', canonical_vertices_smplx)
 
 
 def save_face_probs():
     canonical_vertices_smpl = np.load(f'{PROJDIR}/canonical_vertices_smpl.npy')
-    faces_smpl = SMPL_np('smpl', 'neutral').faces
+    faces_smpl = BodyModel_np('smpl', 'neutral').faces
     np.save(f'{PROJDIR}/smpl_faces.npy', faces_smpl)
 
     face_probs_smpl = get_face_probs(canonical_vertices_smpl, faces_smpl)
     save(f'{PROJDIR}/smpl_face_probs.npy', face_probs_smpl)
 
     canonical_vertices_smplx = np.load(f'{PROJDIR}/canonical_vertices_smplx.npy')
-    faces_smplx = SMPL_np('smplx', 'neutral').faces
+    faces_smplx = BodyModel_np('smplx', 'neutral').faces
     np.save(f'{PROJDIR}/smplx_faces.npy', faces_smplx)
 
     face_probs_smplx = get_face_probs(canonical_vertices_smplx, faces_smplx)
@@ -97,19 +105,27 @@ def get_canonical_joints(body_model, canonical_verts):
     # where the joints would be for such a mesh. We could probably directly use the joint regressor
     # here, but the cleaner way is to fit actual parameters to this changed mesh
     # and see where the joints are for this fit (the regressor should not be used on a posed mesh.)
-    fitter = SMPLFitter_np(body_model, num_betas=300)
+    fitter = BodyFitter_np(body_model, num_betas=300)
     res = fitter.fit(
-        canonical_verts[np.newaxis], n_iter=10, beta_regularizer=0,
-        requested_keys=['joints', 'orientations'])
+        canonical_verts[np.newaxis],
+        num_iter=10,
+        beta_regularizer=0,
+        requested_keys=['joints', 'orientations'],
+    )
 
     canonical_joints = res['joints'][0]
 
     if body_model.num_vertices == 10475:
         smplx_data = np.load(f'{DATA_ROOT}/body_models/smplx/SMPLX_NEUTRAL.npz')
         landmarks = get_landmarks_smplx(
-            res['vertices'], res['orientations'], smplx_data['f'],
-            smplx_data['lmk_faces_idx'], smplx_data['lmk_bary_coords'],
-            smplx_data['dynamic_lmk_faces_idx'], smplx_data['dynamic_lmk_bary_coords'])[0]
+            res['vertices'],
+            res['orientations'],
+            smplx_data['f'],
+            smplx_data['lmk_faces_idx'],
+            smplx_data['lmk_bary_coords'],
+            smplx_data['dynamic_lmk_faces_idx'],
+            smplx_data['dynamic_lmk_bary_coords'],
+        )[0]
         canonical_joints_144 = np.concatenate([canonical_joints, landmarks], axis=0)
     else:
         canonical_joints_144 = None
@@ -118,7 +134,8 @@ def get_canonical_joints(body_model, canonical_verts):
 
 
 def get_internal_regressor(
-        body_model, canonical_verts, canonical_joints, canonical_internal_points):
+    body_model, canonical_verts, canonical_joints, canonical_internal_points
+):
     # Let's now introduce some points along each bone.
     # Explanation: remember that the overall goal is to approximate how SMPL deforms
     # within the mesh. From SMPL, we only know how the surface vertices and the joints
@@ -186,17 +203,41 @@ def symmetrize_verts(verts):
 
 
 def get_canonical_pose():
-    return np.concatenate([np.array(
-        [0, 0, 0,  # pelvis
-         np.deg2rad(0), 0, np.deg2rad(40),  # lhip
-         -np.deg2rad(0), 0, -np.deg2rad(40),  # rhip
-         *((10 * 3) * [0]),
-         0, 0, np.deg2rad(15),  # lcla
-         0, 0, -np.deg2rad(15),  # rcla
-         0, 0, 0,
-         0, 0, np.deg2rad(15),  # lsho
-         0, 0, -np.deg2rad(15),  # rsho
-         ], np.float32), np.zeros([(24 - 18) * 3])])
+    return np.concatenate(
+        [
+            np.array(
+                [
+                    0,
+                    0,
+                    0,  # pelvis
+                    np.deg2rad(0),
+                    0,
+                    np.deg2rad(40),  # lhip
+                    -np.deg2rad(0),
+                    0,
+                    -np.deg2rad(40),  # rhip
+                    *((10 * 3) * [0]),
+                    0,
+                    0,
+                    np.deg2rad(15),  # lcla
+                    0,
+                    0,
+                    -np.deg2rad(15),  # rcla
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    np.deg2rad(15),  # lsho
+                    0,
+                    0,
+                    -np.deg2rad(15),  # rsho
+                ],
+                np.float32,
+            ),
+            np.zeros([(24 - 18) * 3]),
+        ]
+    )
 
 
 def parallel_map_with_progbar(fn, items):
@@ -220,7 +261,8 @@ def get_sobol_points_in_mesh_parallel(mesh, count_two_power, batch_size=8192):
     samples = samples * (mesh.bounds[1] - mesh.bounds[0]) + mesh.bounds[0]
     n_samples = samples.shape[0]
     c = parallel_map_with_progbar(
-        contains, [(mesh, samples[i:i + batch_size]) for i in range(0, n_samples, batch_size)])
+        contains, [(mesh, samples[i : i + batch_size]) for i in range(0, n_samples, batch_size)]
+    )
     return samples[np.concatenate(c, axis=0)]
 
 
@@ -229,15 +271,19 @@ def save_internal_points():
     faces = np.load(f'{PROJDIR}/smpl_faces.npy')
     canonical_mesh = trimesh.Trimesh(canonical_verts, faces)
 
-    internal_points = get_sobol_points_in_mesh_parallel(
-        canonical_mesh, 24, batch_size=4096)
+    internal_points = get_sobol_points_in_mesh_parallel(canonical_mesh, 24, batch_size=4096)
     save(f'{PROJDIR}/canonical_internal_points_smpl.npy', internal_points)
 
 
 def get_landmarks_smplx(
-        vertices, orientations, faces,
-        lmk_faces_idx, lmk_bary_coords,
-        dynamic_lmk_faces_idx, dynamic_lmk_bary_coords):
+    vertices,
+    orientations,
+    faces,
+    lmk_faces_idx,
+    lmk_bary_coords,
+    dynamic_lmk_faces_idx,
+    dynamic_lmk_bary_coords,
+):
     batch_size = vertices.shape[0]
     neck_rot = orientations[:, 12]
 
@@ -248,17 +294,18 @@ def get_landmarks_smplx(
     dyn_lmk_faces_idx = dynamic_lmk_faces_idx[neck_rot_idx]
     dyn_lmk_bary_coords = dynamic_lmk_bary_coords[neck_rot_idx]
 
-    lmk_faces_idx = np.concatenate([
-        np.repeat(lmk_faces_idx[np.newaxis], batch_size, axis=0),
-        dyn_lmk_faces_idx], 1)
-    lmk_bary_coords = np.concatenate([
-        np.repeat(lmk_bary_coords[np.newaxis], batch_size, axis=0),
-        dyn_lmk_bary_coords], 1)
+    lmk_faces_idx = np.concatenate(
+        [np.repeat(lmk_faces_idx[np.newaxis], batch_size, axis=0), dyn_lmk_faces_idx], 1
+    )
+    lmk_bary_coords = np.concatenate(
+        [np.repeat(lmk_bary_coords[np.newaxis], batch_size, axis=0), dyn_lmk_bary_coords], 1
+    )
 
     lmk_faces = faces[lmk_faces_idx]  # b, l, 3
     batch_index = np.arange(batch_size)[:, np.newaxis, np.newaxis]
     lmk_vertices = vertices[batch_index, lmk_faces]  # b, l, 3, 3
     return np.einsum('blfi,blf->bli', lmk_vertices, lmk_bary_coords)
+
 
 if __name__ == '__main__':
     main()

@@ -1,20 +1,28 @@
 import numpy as np
 import tensorflow as tf
 from simplepyutils import FLAGS
-from tensorflow_graphics.math.optimizer.levenberg_marquardt import minimize as levenberg_marquardt
 
 from nlf.tf import tfu
 
 
 def rigid_align(
-        coords_pred, coords_true, *, joint_validity_mask=None, scale_align=False,
-        reflection_align=False):
+    coords_pred,
+    coords_true,
+    *,
+    joint_validity_mask=None,
+    scale_align=False,
+    reflection_align=False
+):
     """Returns the predicted coordinates after rigid alignment to the ground truth."""
     if joint_validity_mask is None:
         joint_validity_mask = tf.ones_like(coords_pred[..., 0], dtype=tf.bool)
     return procrustes_tf(
-        coords_true, coords_pred, joint_validity_mask, allow_scaling=scale_align,
-        allow_reflection=reflection_align)
+        coords_true,
+        coords_pred,
+        joint_validity_mask,
+        allow_scaling=scale_align,
+        allow_reflection=reflection_align,
+    )
 
 
 def linear_combine_points(coords, weights):
@@ -40,7 +48,8 @@ def procrustes_tf(X, Y, validity_mask, allow_scaling=False, allow_reflection=Fal
     Returns the transformed version of Y.
     """
     meanY, T, output_scale, meanX = procrustes_tf_transf(
-        X, Y, validity_mask, allow_scaling, allow_reflection)
+        X, Y, validity_mask, allow_scaling, allow_reflection
+    )
     return ((Y - meanY) @ T) * output_scale + meanX
 
 
@@ -48,9 +57,11 @@ def procrustes_tf_transf(X, Y, validity_mask, allow_scaling=False, allow_reflect
     validity_mask = validity_mask[..., np.newaxis]
     _0 = tf.constant(0, X.dtype)
     n_points_per_example = tf.math.count_nonzero(
-        validity_mask, axis=1, dtype=tf.float32, keepdims=True)
-    denominator_correction_factor = tf.cast(
-        tf.shape(validity_mask)[1], tf.float32) / n_points_per_example
+        validity_mask, axis=1, dtype=tf.float32, keepdims=True
+    )
+    denominator_correction_factor = (
+        tf.cast(tf.shape(validity_mask)[1], tf.float32) / n_points_per_example
+    )
 
     def normalize(Z):
         Z = tf.where(validity_mask, Z, _0)
@@ -89,16 +100,26 @@ def procrustes_tf_transf(X, Y, validity_mask, allow_scaling=False, allow_reflect
 
 
 def reconstruct_absolute(
-        coords2d, coords3d_rel, intrinsics, mix_3d_inside_fov=None, weak_perspective=None,
-        point_validity_mask=None, border_factor1=0.75, border_factor2=None, mix_based_on_3d=True):
+    coords2d,
+    coords3d_rel,
+    intrinsics,
+    mix_3d_inside_fov=None,
+    weak_perspective=None,
+    point_validity_mask=None,
+    border_factor1=0.75,
+    border_factor2=None,
+    mix_based_on_3d=True,
+):
     inv_intrinsics = tf.linalg.inv(tf.cast(intrinsics, coords2d.dtype))
-    coords2d_normalized = tf.matmul(
-        to_homogeneous(coords2d), inv_intrinsics, transpose_b=True)[..., :2]
+    coords2d_normalized = tf.matmul(to_homogeneous(coords2d), inv_intrinsics, transpose_b=True)[
+        ..., :2
+    ]
     if weak_perspective is None:
         weak_perspective = FLAGS.weak_perspective
 
     reconstruct_ref_fn = (
-        reconstruct_ref_weakpersp if weak_perspective else reconstruct_ref_fullpersp)
+        reconstruct_ref_weakpersp if weak_perspective else reconstruct_ref_fullpersp
+    )
 
     if border_factor2 is None:
         border_factor2 = border_factor1
@@ -106,7 +127,9 @@ def reconstruct_absolute(
     is_predicted_to_be_in_fov1 = is_within_fov(coords2d, border_factor1)
 
     if point_validity_mask is not None:
-        is_predicted_to_be_in_fov1 = tf.logical_and(is_predicted_to_be_in_fov1, point_validity_mask)
+        is_predicted_to_be_in_fov1 = tf.logical_and(
+            is_predicted_to_be_in_fov1, point_validity_mask
+        )
 
     ref = reconstruct_ref_fn(coords2d_normalized, coords3d_rel, is_predicted_to_be_in_fov1)
     coords_abs_3d_based = coords3d_rel + tf.expand_dims(ref, 1)
@@ -117,8 +140,8 @@ def reconstruct_absolute(
 
     if mix_3d_inside_fov is not None:
         coords_abs_2d_based = (
-                mix_3d_inside_fov * coords_abs_3d_based +
-                (1 - mix_3d_inside_fov) * coords_abs_2d_based)
+            mix_3d_inside_fov * coords_abs_3d_based + (1 - mix_3d_inside_fov) * coords_abs_2d_based
+        )
 
     if mix_based_on_3d:
         coords_proj_for_mix_decision = project_pose(coords_abs_3d_based, intrinsics)
@@ -127,19 +150,22 @@ def reconstruct_absolute(
 
     is_predicted_to_be_in_fov2 = tf.logical_and(
         is_within_fov(coords_proj_for_mix_decision, border_factor2),
-        coords_abs_3d_based[..., 2] > 0.001)
+        coords_abs_3d_based[..., 2] > 0.001,
+    )
 
     return tf.where(
-        is_predicted_to_be_in_fov2[..., tf.newaxis], coords_abs_2d_based, coords_abs_3d_based)
-
+        is_predicted_to_be_in_fov2[..., tf.newaxis], coords_abs_2d_based, coords_abs_3d_based
+    )
 
 
 def reconstruct_ref_weakpersp(normalized_2d, coords3d_rel, validity_mask):
     mean3d, stdev3d = tfu.mean_stdev_masked(
-        coords3d_rel[..., :2], validity_mask, items_axis=1, dimensions_axis=2)
+        coords3d_rel[..., :2], validity_mask, items_axis=1, dimensions_axis=2
+    )
 
     mean2d, stdev2d = tfu.mean_stdev_masked(
-        normalized_2d[..., :2], validity_mask, items_axis=1, dimensions_axis=2)
+        normalized_2d[..., :2], validity_mask, items_axis=1, dimensions_axis=2
+    )
 
     stdev2d = tf.maximum(stdev2d, 1e-5)
     stdev3d = tf.maximum(stdev3d, 1e-5)
@@ -159,7 +185,8 @@ def map_fn_via_tensorarray(fn, elems, fn_output_signature):
     # unlike map_fn
     batch_size = tf.shape(tf.nest.flatten(elems)[0])[0]
     arr = tf.TensorArray(
-        fn_output_signature.dtype, size=batch_size, element_shape=fn_output_signature.shape)
+        fn_output_signature.dtype, size=batch_size, element_shape=fn_output_signature.shape
+    )
     for i in tf.range(batch_size):
         tf.autograph.experimental.set_loop_options(parallel_iterations=1024)
         arr = arr.write(i, fn(tf.nest.map_structure(lambda x: x[i], elems)))
@@ -185,16 +212,20 @@ def reconstruct_ref_fullpersp(normalized_2d, coords3d_rel, validity_mask):
     if isinstance(normalized_2d, tf.RaggedTensor):
         return map_fn_via_tensorarray(
             lambda x: reconstruct_ref_fullpersp(
-                x[0][tf.newaxis], x[1][tf.newaxis], x[2][tf.newaxis])[0],
+                x[0][tf.newaxis], x[1][tf.newaxis], x[2][tf.newaxis]
+            )[0],
             (normalized_2d, coords3d_rel, validity_mask),
-            fn_output_signature=tf.TensorSpec([3], tf.float32))
+            fn_output_signature=tf.TensorSpec([3], tf.float32),
+        )
 
     n_batch = tf.shape(normalized_2d)[0]
     n_points = tf.shape(normalized_2d)[1]
 
     def rms_normalize_and_reshape(x):
-        scale = tf.sqrt(tfu.reduce_mean_masked(
-            tf.square(x), validity_mask, axis=(1, 2), keepdims=True) + np.float32(1e-10))
+        scale = tf.sqrt(
+            tfu.reduce_mean_masked(tf.square(x), validity_mask, axis=(1, 2), keepdims=True)
+            + np.float32(1e-10)
+        )
         normalized = x / scale
         reshaped = tf.reshape(normalized, [-1, n_points * 2, 1])
         return scale, reshaped
@@ -207,14 +238,31 @@ def reconstruct_ref_fullpersp(normalized_2d, coords3d_rel, validity_mask):
     scale_rel_backproj, b = rms_normalize_and_reshape(rel_backproj)
     # b is [batch_size, n_points * 2, 1]
 
-    weights = tf.repeat(
-        tf.cast(validity_mask, tf.float32), 2, axis=1)[..., tf.newaxis] + np.float32(1e-4)
+    # Alternative:
+    #    weights = tf.cast(validity_mask, tf.float32) + np.float32(1e-8)
+    #    weights = tf.repeat(weights, 2, axis=1)
+    #    ref = lstsq_cholesky(A, b, weights, l2_regularizer=np.float32(FLAGS.fullpersp_l2_regul))
+    # Original:
+    weights = tf.cast(validity_mask, tf.float32) + np.float32(1e-4)
+    weights = tf.repeat(weights, 2, axis=1)[..., tf.newaxis]
     ref = tf.linalg.lstsq(
-        A * weights, b * weights, l2_regularizer=FLAGS.fullpersp_l2_regul, fast=True)
+        A * weights, b * weights, l2_regularizer=FLAGS.fullpersp_l2_regul, fast=True
+    )
     # ref is [batch_size, 3, 1]
 
     ref = tf.concat([ref[:, :2], ref[:, 2:] / scale2d], axis=1) * scale_rel_backproj
     return tf.squeeze(ref, axis=-1)
+
+
+def lstsq_cholesky(matrix, rhs, weights, l2_regularizer):
+    weighted_matrix = weights[..., tf.newaxis] * matrix
+    regularized_gramian = (
+        tf.linalg.matmul(weighted_matrix, matrix, transpose_a=True)
+        + tf.eye(3, dtype=matrix.dtype) * l2_regularizer
+    )
+    ATb = tf.linalg.matmul(weighted_matrix, rhs, transpose_a=True)
+    chol = tf.linalg.cholesky(regularized_gramian)
+    return tf.linalg.cholesky_solve(chol, ATb)
 
 
 def project(points):
@@ -235,7 +283,7 @@ def is_within_fov(imcoords, border_factor=0.75):
 
 
 def project_pose(coords3d, intrinsic_matrix):
-    projected = coords3d / tf.maximum(np.float32(0.001), coords3d[..., 2:])
+    projected = coords3d / tf.maximum(np.float32(0.1), coords3d[..., 2:])
     return tf.matmul(projected, intrinsic_matrix[..., :2, :], transpose_b=True)
 
 
@@ -245,9 +293,9 @@ def intrinsic_matrix_from_field_of_view(fov_degrees, imshape):
     larger_side = tf.reduce_max(imshape)
     focal_length = larger_side / (tf.math.tan(fov_radians / 2) * 2)
     return tf.convert_to_tensor(
-        [[[focal_length, 0, imshape[1] / 2],
-          [0, focal_length, imshape[0] / 2],
-          [0, 0, 1]]], tf.float32)
+        [[[focal_length, 0, imshape[1] / 2], [0, focal_length, imshape[0] / 2], [0, 0, 1]]],
+        tf.float32,
+    )
 
 
 def get_new_rotation_matrix(forward_vector, up_vector):
@@ -259,7 +307,8 @@ def get_new_rotation_matrix(forward_vector, up_vector):
     # in case lookdir happens to align with the up vector and the above cross product is zero.
     new_x_alt = tf.stack([new_z[:, 2], tf.zeros_like(new_z[:, 2]), -new_z[:, 0]], axis=1)
     new_x = tf.linalg.l2_normalize(
-        tf.where(tf.linalg.norm(new_x, axis=-1, keepdims=True) == 0, new_x_alt, new_x), axis=-1)
+        tf.where(tf.linalg.norm(new_x, axis=-1, keepdims=True) == 0, new_x_alt, new_x), axis=-1
+    )
     # Complete the right-handed coordinate system to get Y
     new_y = tf.linalg.cross(new_z, new_x)
     # Stack the axis vectors to get the rotation matrix
@@ -273,20 +322,11 @@ def rotation_mat(angle, rot_axis):
     _1 = tf.ones_like(angle)
 
     if rot_axis == 'x':
-        entries = [
-            _1, _0, _0,
-            _0, cos, sin,
-            _0, -sin, cos]
+        entries = [_1, _0, _0, _0, cos, sin, _0, -sin, cos]
     elif rot_axis == 'y':
-        entries = [
-            cos, _0, -sin,
-            _0, _1, _0,
-            sin, _0, cos]
+        entries = [cos, _0, -sin, _0, _1, _0, sin, _0, cos]
     else:
-        entries = [
-            cos, -sin, _0,
-            sin, cos, _0,
-            _0, _0, _1]
+        entries = [cos, -sin, _0, sin, cos, _0, _0, _0, _1]
 
     return tf.reshape(tf.stack(entries, axis=-1), tf.concat([tf.shape(angle), [3, 3]], axis=0))
 
@@ -301,8 +341,8 @@ def decompose_rotation_to_twist_and_swing(rotation, twist_axis):
     rotated_twist_axis = tf.linalg.matvec(rotation, twist_axis)
     swing_axis = tf.linalg.cross(twist_axis, rotated_twist_axis)
     swing_rotation = project_to_SO3(
-        outer_product(rotated_twist_axis, twist_axis) +
-        outer_product(swing_axis, swing_axis))
+        outer_product(rotated_twist_axis, twist_axis) + outer_product(swing_axis, swing_axis)
+    )
     twist_rotation = tf.linalg.matmul(swing_rotation, rotation, transpose_a=True)
     return twist_rotation, swing_rotation
 
@@ -332,7 +372,8 @@ def haversine_rotmat(rot1, rot2=None):
 
 
 def center_relative_pose(
-        coords3d, joint_validity_mask=None, center_is_mean=False, center_joints=None):
+    coords3d, joint_validity_mask=None, center_is_mean=False, center_joints=None
+):
     if center_is_mean:
         if isinstance(coords3d, np.ndarray):
             if joint_validity_mask is None:
@@ -349,10 +390,13 @@ def center_relative_pose(
                     center = tfu.reduce_mean_masked(
                         tf.gather(coords3d, center_joints, axis=1),
                         tf.gather(joint_validity_mask, center_joints, axis=1),
-                        axis=1, keepdims=True)
+                        axis=1,
+                        keepdims=True,
+                    )
                 else:
                     center = tfu.reduce_mean_masked(
-                        coords3d, joint_validity_mask, axis=1, keepdims=True)
+                        coords3d, joint_validity_mask, axis=1, keepdims=True
+                    )
     else:
         center = coords3d[:, -1:]
     return coords3d - center

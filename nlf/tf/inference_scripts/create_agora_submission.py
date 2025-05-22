@@ -3,10 +3,9 @@ import os.path as osp
 import pickle
 import zipfile
 
+import bodycompress
 import cameralib
-
 import simplepyutils as spu
-from humcentr_cli.util.serialization import Reader
 from simplepyutils import FLAGS
 
 
@@ -18,10 +17,10 @@ def main():
     spu.argparse.initialize(parser)
 
     camera = cameralib.Camera.from_fov(FLAGS.fov, (2160, 3840))
-    with Reader(FLAGS.in_pred_path) as xz_in:
+    with bodycompress.BodyDecompressor(FLAGS.in_pred_path) as preds:
         with zipfile.ZipFile(
                 FLAGS.out_pred_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=4) as zipf_out:
-            for data in spu.progressbar(xz_in):
+            for data in spu.progressbar(preds):
                 image_name = osp.splitext(osp.basename(data['filename']))[0]
                 for i_person, (vertices, joints) in enumerate(
                         zip(data['vertices'], data['joints'])):

@@ -21,6 +21,5 @@ def heatmap_to_25d(coords, is_training):
 
 
 def heatmap_to_metric(coords, is_training):
-    coords2d = heatmap_to_image(
-        coords[..., :2], is_training) * FLAGS.box_size_m / FLAGS.proc_side
+    coords2d = heatmap_to_image(coords[..., :2], is_training) * FLAGS.box_size_m / FLAGS.proc_side
     return tf.concat([coords2d, coords[..., 2:] * FLAGS.box_size_m], axis=-1)

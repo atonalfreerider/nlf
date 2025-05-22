@@ -5,13 +5,18 @@ import warnings
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
-from nlf.pt.util import get_config
+
+import florch.layers
+from simplepyutils import FLAGS
 import torch
 from torch import Tensor, nn
 from torchvision.models._api import Weights, WeightsEnum
 from torchvision.models._meta import _IMAGENET_CATEGORIES
-from torchvision.models._utils import _make_divisible, _ovewrite_named_param, \
-    handle_legacy_interface
+from torchvision.models._utils import (
+    _make_divisible,
+    _ovewrite_named_param,
+    handle_legacy_interface,
+)
 from torchvision.ops import StochasticDepth
 from torchvision.ops.misc import Conv2dNormActivation, SqueezeExcitation
 from torchvision.transforms._presets import ImageClassification, InterpolationMode
@@ -43,6 +48,7 @@ __all__ = [
     "efficientnet_v2_l",
 ]
 
+
 @dataclass
 class _MBConvConfig:
     expand_ratio: float
@@ -63,25 +69,33 @@ class MBConvConfig(_MBConvConfig):
     # Stores information listed at Table 1 of the EfficientNet paper & Table 4 of the
     # EfficientNetV2 paper
     def __init__(
-            self,
-            expand_ratio: float,
-            kernel: int,
-            stride: int,
-            input_channels: int,
-            out_channels: int,
-            num_layers: int,
-            width_mult: float = 1.0,
-            depth_mult: float = 1.0,
-            block: Optional[Callable[..., nn.Module]] = None,
-            bottomright_stride: bool = False,
+        self,
+        expand_ratio: float,
+        kernel: int,
+        stride: int,
+        input_channels: int,
+        out_channels: int,
+        num_layers: int,
+        width_mult: float = 1.0,
+        depth_mult: float = 1.0,
+        block: Optional[Callable[..., nn.Module]] = None,
+        bottomright_stride: bool = False,
     ) -> None:
         input_channels = self.adjust_channels(input_channels, width_mult)
         out_channels = self.adjust_channels(out_channels, width_mult)
         num_layers = self.adjust_depth(num_layers, depth_mult)
         if block is None:
             block = MBConv
-        super().__init__(expand_ratio, kernel, stride, input_channels, out_channels, num_layers,
-                         block, bottomright_stride)
+        super().__init__(
+            expand_ratio,
+            kernel,
+            stride,
+            input_channels,
+            out_channels,
+            num_layers,
+            block,
+            bottomright_stride,
+        )
 
     @staticmethod
     def adjust_depth(num_layers: int, depth_mult: float):
@@ -91,29 +105,37 @@ class MBConvConfig(_MBConvConfig):
 class FusedMBConvConfig(_MBConvConfig):
     # Stores information listed at Table 4 of the EfficientNetV2 paper
     def __init__(
-            self,
-            expand_ratio: float,
-            kernel: int,
-            stride: int,
-            input_channels: int,
-            out_channels: int,
-            num_layers: int,
-            block: Optional[Callable[..., nn.Module]] = None,
-            bottomright_stride: bool = False,
+        self,
+        expand_ratio: float,
+        kernel: int,
+        stride: int,
+        input_channels: int,
+        out_channels: int,
+        num_layers: int,
+        block: Optional[Callable[..., nn.Module]] = None,
+        bottomright_stride: bool = False,
     ) -> None:
         if block is None:
             block = FusedMBConv
-        super().__init__(expand_ratio, kernel, stride, input_channels, out_channels, num_layers,
-                         block, bottomright_stride)
+        super().__init__(
+            expand_ratio,
+            kernel,
+            stride,
+            input_channels,
+            out_channels,
+            num_layers,
+            block,
+            bottomright_stride,
+        )
 
 
 class MBConv(nn.Module):
     def __init__(
-            self,
-            cnf: MBConvConfig,
-            stochastic_depth_prob: float,
-            norm_layer: Callable[..., nn.Module],
-            se_layer: Callable[..., nn.Module] = SqueezeExcitation,
+        self,
+        cnf: MBConvConfig,
+        stochastic_depth_prob: float,
+        norm_layer: Callable[..., nn.Module],
+        se_layer: Callable[..., nn.Module] = SqueezeExcitation,
     ) -> None:
         super().__init__()
 
@@ -152,13 +174,17 @@ class MBConv(nn.Module):
 
         # squeeze and excitation
         squeeze_channels = max(1, cnf.input_channels // 4)
-        layers[str(len(layers) - 1)] = se_layer(expanded_channels, squeeze_channels,
-                                                activation=partial(nn.SiLU, inplace=True))
+        layers[str(len(layers) - 1)] = se_layer(
+            expanded_channels, squeeze_channels, activation=partial(nn.SiLU, inplace=True)
+        )
 
         # project
         layers[str(len(layers) - 1)] = Conv2dNormActivation(
-            expanded_channels, cnf.out_channels, kernel_size=1, norm_layer=norm_layer,
-            activation_layer=None
+            expanded_channels,
+            cnf.out_channels,
+            kernel_size=1,
+            norm_layer=norm_layer,
+            activation_layer=None,
         )
 
         self.block = nn.Sequential(layers)
@@ -175,10 +201,10 @@ class MBConv(nn.Module):
 
 class FusedMBConv(nn.Module):
     def __init__(
-            self,
-            cnf: FusedMBConvConfig,
-            stochastic_depth_prob: float,
-            norm_layer: Callable[..., nn.Module],
+        self,
+        cnf: FusedMBConvConfig,
+        stochastic_depth_prob: float,
+        norm_layer: Callable[..., nn.Module],
     ) -> None:
         super().__init__()
 
@@ -208,8 +234,11 @@ class FusedMBConv(nn.Module):
 
             # project
             layers[str(len(layers) - 1)] = Conv2dNormActivation(
-                expanded_channels, cnf.out_channels, kernel_size=1, norm_layer=norm_layer,
-                activation_layer=None
+                expanded_channels,
+                cnf.out_channels,
+                kernel_size=1,
+                norm_layer=norm_layer,
+                activation_layer=None,
             )
         else:
             layers[str(len(layers) - 1)] = Conv2dNormActivation(
@@ -236,14 +265,14 @@ class FusedMBConv(nn.Module):
 
 class EfficientNet(nn.Module):
     def __init__(
-            self,
-            inverted_residual_setting: Sequence[Union[MBConvConfig, FusedMBConvConfig]],
-            dropout: float,
-            stochastic_depth_prob: float = 0.2,
-            num_classes: int = 1000,
-            norm_layer: Optional[Callable[..., nn.Module]] = None,
-            last_channel: Optional[int] = None,
-            **kwargs: Any,
+        self,
+        inverted_residual_setting: Sequence[Union[MBConvConfig, FusedMBConvConfig]],
+        dropout: float,
+        stochastic_depth_prob: float = 0.2,
+        num_classes: int = 1000,
+        norm_layer: Optional[Callable[..., nn.Module]] = None,
+        last_channel: Optional[int] = None,
+        **kwargs: Any,
     ) -> None:
         """
         EfficientNet V1 and V2 main class
@@ -264,8 +293,8 @@ class EfficientNet(nn.Module):
         if not inverted_residual_setting:
             raise ValueError("The inverted_residual_setting should not be empty")
         elif not (
-                isinstance(inverted_residual_setting, Sequence)
-                and all([isinstance(s, _MBConvConfig) for s in inverted_residual_setting])
+            isinstance(inverted_residual_setting, Sequence)
+            and all([isinstance(s, _MBConvConfig) for s in inverted_residual_setting])
         ):
             raise TypeError("The inverted_residual_setting should be List[MBConvConfig]")
 
@@ -289,8 +318,14 @@ class EfficientNet(nn.Module):
 
         layers['padding'] = fixed_padding_layer(3)
         layers[str(len(layers) - 1)] = Conv2dNormActivation(
-            3, firstconv_output_channels, kernel_size=3, stride=2, norm_layer=norm_layer,
-            activation_layer=nn.SiLU, padding=0)
+            3,
+            firstconv_output_channels,
+            kernel_size=3,
+            stride=2,
+            norm_layer=norm_layer,
+            activation_layer=nn.SiLU,
+            padding=0,
+        )
 
         # building inverted residual blocks
         total_stage_blocks = sum(cnf.num_layers for cnf in inverted_residual_setting)
@@ -317,11 +352,16 @@ class EfficientNet(nn.Module):
 
         # building last several layers
         lastconv_input_channels = inverted_residual_setting[-1].out_channels
-        lastconv_output_channels = last_channel if last_channel is not None else 4 * \
-                                                                                 lastconv_input_channels
+        lastconv_output_channels = (
+            last_channel if last_channel is not None else 4 * lastconv_input_channels
+        )
         layers[str(len(layers) - 1)] = Conv2dNormActivation(
-            lastconv_input_channels, lastconv_output_channels, kernel_size=1, norm_layer=norm_layer,
-            activation_layer=nn.SiLU)
+            lastconv_input_channels,
+            lastconv_output_channels,
+            kernel_size=1,
+            norm_layer=norm_layer,
+            activation_layer=nn.SiLU,
+        )
 
         self.features = nn.Sequential(layers)
         self.avgpool = nn.AdaptiveAvgPool2d(1)
@@ -335,7 +375,7 @@ class EfficientNet(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out")
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm, florch.layers.BatchRenorm2d)):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Linear):
@@ -358,12 +398,12 @@ class EfficientNet(nn.Module):
 
 
 def _efficientnet(
-        inverted_residual_setting: Sequence[Union[MBConvConfig, FusedMBConvConfig]],
-        dropout: float,
-        last_channel: Optional[int],
-        weights: Optional[WeightsEnum],
-        progress: bool,
-        **kwargs: Any,
+    inverted_residual_setting: Sequence[Union[MBConvConfig, FusedMBConvConfig]],
+    dropout: float,
+    last_channel: Optional[int],
+    weights: Optional[WeightsEnum],
+    progress: bool,
+    **kwargs: Any,
 ) -> EfficientNet:
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
@@ -371,20 +411,24 @@ def _efficientnet(
     model = EfficientNet(inverted_residual_setting, dropout, last_channel=last_channel, **kwargs)
 
     if weights is not None:
-        model.load_state_dict(weights.get_state_dict(progress=progress))
+        missing_keys, unexpected_keys = model.load_state_dict(weights.get_state_dict(progress=progress), strict=False)
+        if len(missing_keys) > 0:
+            print(f"Missing keys in EfficientNet model state_dict: {missing_keys}")
+        if len(unexpected_keys) > 0:
+            print(f"Unexpected keys in EfficientNet model state_dict: {unexpected_keys}")
 
     return model
 
 
 def _efficientnet_conf(
-        arch: str,
-        **kwargs: Any,
+    arch: str,
+    **kwargs: Any,
 ) -> Tuple[Sequence[Union[MBConvConfig, FusedMBConvConfig]], Optional[int]]:
     inverted_residual_setting: Sequence[Union[MBConvConfig, FusedMBConvConfig]]
-    FLAGS = get_config()
     if arch.startswith("efficientnet_b"):
-        bneck_conf = partial(MBConvConfig, width_mult=kwargs.pop("width_mult"),
-                             depth_mult=kwargs.pop("depth_mult"))
+        bneck_conf = partial(
+            MBConvConfig, width_mult=kwargs.pop("width_mult"), depth_mult=kwargs.pop("depth_mult")
+        )
         inverted_residual_setting = [
             bneck_conf(1, 3, 1, 32, 16, 1),
             bneck_conf(6, 3, 2, 16, 24, 2),
@@ -427,6 +471,17 @@ def _efficientnet_conf(
             MBConvConfig(6, 3, 1, 384, 640, 7),
         ]
         last_channel = 1280
+    elif arch.startswith("efficientnet_v2_xl"):
+        inverted_residual_setting = [
+            FusedMBConvConfig(1, 3, 1, 32, 32, 4),
+            FusedMBConvConfig(4, 3, 2, 32, 64, 8),
+            FusedMBConvConfig(4, 3, 2, 64, 96, 8),
+            MBConvConfig(4, 3, 2, 96, 192, 16),
+            MBConvConfig(6, 3, 1, 192, 256, 24),
+            MBConvConfig(6, 3, 2, 256, 512, 32, bottomright_stride=FLAGS.centered_stride),
+            MBConvConfig(6, 3, 1, 512, 640, 8),
+        ]
+        last_channel = 1280
     else:
         raise ValueError(f"Unsupported model type {arch}")
 
@@ -441,14 +496,14 @@ _COMMON_META_V1 = {
     **_COMMON_META,
     "min_size": (1, 1),
     "recipe": "https://github.com/pytorch/vision/tree/main/references/classification#efficientnet"
-              "-v1",
+    "-v1",
 }
 
 _COMMON_META_V2 = {
     **_COMMON_META,
     "min_size": (33, 33),
     "recipe": "https://github.com/pytorch/vision/tree/main/references/classification#efficientnet"
-              "-v2",
+    "-v2",
 }
 
 
@@ -457,8 +512,10 @@ class EfficientNet_B0_Weights(WeightsEnum):
         # Weights ported from https://github.com/rwightman/pytorch-image-models/
         url="https://download.pytorch.org/models/efficientnet_b0_rwightman-3dd342df.pth",
         transforms=partial(
-            ImageClassification, crop_size=224, resize_size=256,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=224,
+            resize_size=256,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -480,8 +537,10 @@ class EfficientNet_B1_Weights(WeightsEnum):
         # Weights ported from https://github.com/rwightman/pytorch-image-models/
         url="https://download.pytorch.org/models/efficientnet_b1_rwightman-533bc792.pth",
         transforms=partial(
-            ImageClassification, crop_size=240, resize_size=256,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=240,
+            resize_size=256,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -498,14 +557,16 @@ class EfficientNet_B1_Weights(WeightsEnum):
     IMAGENET1K_V2 = Weights(
         url="https://download.pytorch.org/models/efficientnet_b1-c27df63c.pth",
         transforms=partial(
-            ImageClassification, crop_size=240, resize_size=255,
-            interpolation=InterpolationMode.BILINEAR
+            ImageClassification,
+            crop_size=240,
+            resize_size=255,
+            interpolation=InterpolationMode.BILINEAR,
         ),
         meta={
             **_COMMON_META_V1,
             "num_params": 7794184,
             "recipe": "https://github.com/pytorch/vision/issues/3995#new-recipe-with-lr-wd-crop"
-                      "-tuning",
+            "-tuning",
             "_metrics": {
                 "ImageNet-1K": {
                     "acc@1": 79.838,
@@ -529,8 +590,10 @@ class EfficientNet_B2_Weights(WeightsEnum):
         # Weights ported from https://github.com/rwightman/pytorch-image-models/
         url="https://download.pytorch.org/models/efficientnet_b2_rwightman-bcdf34b7.pth",
         transforms=partial(
-            ImageClassification, crop_size=288, resize_size=288,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=288,
+            resize_size=288,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -552,8 +615,10 @@ class EfficientNet_B3_Weights(WeightsEnum):
         # Weights ported from https://github.com/rwightman/pytorch-image-models/
         url="https://download.pytorch.org/models/efficientnet_b3_rwightman-cf984f9c.pth",
         transforms=partial(
-            ImageClassification, crop_size=300, resize_size=320,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=300,
+            resize_size=320,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -575,8 +640,10 @@ class EfficientNet_B4_Weights(WeightsEnum):
         # Weights ported from https://github.com/rwightman/pytorch-image-models/
         url="https://download.pytorch.org/models/efficientnet_b4_rwightman-7eb33cd5.pth",
         transforms=partial(
-            ImageClassification, crop_size=380, resize_size=384,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=380,
+            resize_size=384,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -598,8 +665,10 @@ class EfficientNet_B5_Weights(WeightsEnum):
         # Weights ported from https://github.com/lukemelas/EfficientNet-PyTorch/
         url="https://download.pytorch.org/models/efficientnet_b5_lukemelas-b6417697.pth",
         transforms=partial(
-            ImageClassification, crop_size=456, resize_size=456,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=456,
+            resize_size=456,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -621,8 +690,10 @@ class EfficientNet_B6_Weights(WeightsEnum):
         # Weights ported from https://github.com/lukemelas/EfficientNet-PyTorch/
         url="https://download.pytorch.org/models/efficientnet_b6_lukemelas-c76e70fd.pth",
         transforms=partial(
-            ImageClassification, crop_size=528, resize_size=528,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=528,
+            resize_size=528,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -644,8 +715,10 @@ class EfficientNet_B7_Weights(WeightsEnum):
         # Weights ported from https://github.com/lukemelas/EfficientNet-PyTorch/
         url="https://download.pytorch.org/models/efficientnet_b7_lukemelas-dcc49843.pth",
         transforms=partial(
-            ImageClassification, crop_size=600, resize_size=600,
-            interpolation=InterpolationMode.BICUBIC
+            ImageClassification,
+            crop_size=600,
+            resize_size=600,
+            interpolation=InterpolationMode.BICUBIC,
         ),
         meta={
             **_COMMON_META_V1,
@@ -748,10 +821,35 @@ class EfficientNet_V2_L_Weights(WeightsEnum):
     )
     DEFAULT = IMAGENET1K_V1
 
+class EfficientNet_V2_L_Weights(WeightsEnum):
+    # Weights ported from https://github.com/google/automl/tree/master/efficientnetv2
+    IMAGENET1K_V1 = Weights(
+        url="https://download.pytorch.org/models/efficientnet_v2_l-59c71312.pth",
+        transforms=partial(
+            ImageClassification,
+            crop_size=480,
+            resize_size=480,
+            interpolation=InterpolationMode.BICUBIC,
+            mean=(0.5, 0.5, 0.5),
+            std=(0.5, 0.5, 0.5),
+        ),
+        meta={
+            **_COMMON_META_V2,
+            "num_params": 118515272,
+            "_metrics": {
+                "ImageNet-1K": {
+                    "acc@1": 85.808,
+                    "acc@5": 97.788,
+                }
+            },
+            "_docs": """These weights are ported from the original paper.""",
+        },
+    )
+    DEFAULT = IMAGENET1K_V1
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B0_Weights.IMAGENET1K_V1))
 def efficientnet_b0(
-        *, weights: Optional[EfficientNet_B0_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B0_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B0 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -774,14 +872,15 @@ def efficientnet_b0(
     """
     weights = EfficientNet_B0_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b0", width_mult=1.0,
-                                                                 depth_mult=1.0)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b0", width_mult=1.0, depth_mult=1.0
+    )
     return _efficientnet(inverted_residual_setting, 0.2, last_channel, weights, progress, **kwargs)
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B1_Weights.IMAGENET1K_V1))
 def efficientnet_b1(
-        *, weights: Optional[EfficientNet_B1_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B1_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B1 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -804,14 +903,15 @@ def efficientnet_b1(
     """
     weights = EfficientNet_B1_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b1", width_mult=1.0,
-                                                                 depth_mult=1.1)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b1", width_mult=1.0, depth_mult=1.1
+    )
     return _efficientnet(inverted_residual_setting, 0.2, last_channel, weights, progress, **kwargs)
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B2_Weights.IMAGENET1K_V1))
 def efficientnet_b2(
-        *, weights: Optional[EfficientNet_B2_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B2_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B2 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -834,14 +934,15 @@ def efficientnet_b2(
     """
     weights = EfficientNet_B2_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b2", width_mult=1.1,
-                                                                 depth_mult=1.2)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b2", width_mult=1.1, depth_mult=1.2
+    )
     return _efficientnet(inverted_residual_setting, 0.3, last_channel, weights, progress, **kwargs)
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B3_Weights.IMAGENET1K_V1))
 def efficientnet_b3(
-        *, weights: Optional[EfficientNet_B3_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B3_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B3 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -864,14 +965,15 @@ def efficientnet_b3(
     """
     weights = EfficientNet_B3_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b3", width_mult=1.2,
-                                                                 depth_mult=1.4)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b3", width_mult=1.2, depth_mult=1.4
+    )
     return _efficientnet(inverted_residual_setting, 0.3, last_channel, weights, progress, **kwargs)
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B4_Weights.IMAGENET1K_V1))
 def efficientnet_b4(
-        *, weights: Optional[EfficientNet_B4_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B4_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B4 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -894,14 +996,15 @@ def efficientnet_b4(
     """
     weights = EfficientNet_B4_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b4", width_mult=1.4,
-                                                                 depth_mult=1.8)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b4", width_mult=1.4, depth_mult=1.8
+    )
     return _efficientnet(inverted_residual_setting, 0.4, last_channel, weights, progress, **kwargs)
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B5_Weights.IMAGENET1K_V1))
 def efficientnet_b5(
-        *, weights: Optional[EfficientNet_B5_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B5_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B5 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -924,8 +1027,9 @@ def efficientnet_b5(
     """
     weights = EfficientNet_B5_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b5", width_mult=1.6,
-                                                                 depth_mult=2.2)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b5", width_mult=1.6, depth_mult=2.2
+    )
     return _efficientnet(
         inverted_residual_setting,
         0.4,
@@ -939,7 +1043,7 @@ def efficientnet_b5(
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B6_Weights.IMAGENET1K_V1))
 def efficientnet_b6(
-        *, weights: Optional[EfficientNet_B6_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B6_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B6 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -962,8 +1066,9 @@ def efficientnet_b6(
     """
     weights = EfficientNet_B6_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b6", width_mult=1.8,
-                                                                 depth_mult=2.6)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b6", width_mult=1.8, depth_mult=2.6
+    )
     return _efficientnet(
         inverted_residual_setting,
         0.5,
@@ -977,7 +1082,7 @@ def efficientnet_b6(
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_B7_Weights.IMAGENET1K_V1))
 def efficientnet_b7(
-        *, weights: Optional[EfficientNet_B7_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_B7_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """EfficientNet B7 model architecture from the `EfficientNet: Rethinking Model Scaling for
     Convolutional
@@ -1000,8 +1105,9 @@ def efficientnet_b7(
     """
     weights = EfficientNet_B7_Weights.verify(weights)
 
-    inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_b7", width_mult=2.0,
-                                                                 depth_mult=3.1)
+    inverted_residual_setting, last_channel = _efficientnet_conf(
+        "efficientnet_b7", width_mult=2.0, depth_mult=3.1
+    )
     return _efficientnet(
         inverted_residual_setting,
         0.5,
@@ -1015,7 +1121,7 @@ def efficientnet_b7(
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_V2_S_Weights.IMAGENET1K_V1))
 def efficientnet_v2_s(
-        *, weights: Optional[EfficientNet_V2_S_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_V2_S_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """
     Constructs an EfficientNetV2-S architecture from
@@ -1039,20 +1145,23 @@ def efficientnet_v2_s(
     weights = EfficientNet_V2_S_Weights.verify(weights)
 
     inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_v2_s")
+
+    if "norm_layer" not in kwargs:
+        kwargs["norm_layer"] = partial(nn.BatchNorm2d, eps=1e-03)
+
     return _efficientnet(
         inverted_residual_setting,
         0.2,
         last_channel,
         weights,
         progress,
-        norm_layer=partial(nn.BatchNorm2d, eps=1e-03),
         **kwargs,
     )
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_V2_M_Weights.IMAGENET1K_V1))
 def efficientnet_v2_m(
-        *, weights: Optional[EfficientNet_V2_M_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_V2_M_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """
     Constructs an EfficientNetV2-M architecture from
@@ -1075,6 +1184,9 @@ def efficientnet_v2_m(
     """
     weights = EfficientNet_V2_M_Weights.verify(weights)
 
+    if "norm_layer" not in kwargs:
+        kwargs["norm_layer"] = partial(nn.BatchNorm2d, eps=1e-03)
+
     inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_v2_m")
     return _efficientnet(
         inverted_residual_setting,
@@ -1082,14 +1194,13 @@ def efficientnet_v2_m(
         last_channel,
         weights,
         progress,
-        norm_layer=partial(nn.BatchNorm2d, eps=1e-03),
         **kwargs,
     )
 
 
 @handle_legacy_interface(weights=("pretrained", EfficientNet_V2_L_Weights.IMAGENET1K_V1))
 def efficientnet_v2_l(
-        *, weights: Optional[EfficientNet_V2_L_Weights] = None, progress: bool = True, **kwargs: Any
+    *, weights: Optional[EfficientNet_V2_L_Weights] = None, progress: bool = True, **kwargs: Any
 ) -> EfficientNet:
     """
     Constructs an EfficientNetV2-L architecture from
@@ -1112,6 +1223,9 @@ def efficientnet_v2_l(
     """
     weights = EfficientNet_V2_L_Weights.verify(weights)
 
+    if "norm_layer" not in kwargs:
+        kwargs["norm_layer"] = partial(nn.BatchNorm2d, eps=1e-03)
+
     inverted_residual_setting, last_channel = _efficientnet_conf("efficientnet_v2_l")
     return _efficientnet(
         inverted_residual_setting,
@@ -1119,7 +1233,6 @@ def efficientnet_v2_l(
         last_channel,
         weights,
         progress,
-        norm_layer=partial(nn.BatchNorm2d, eps=1e-03),
         **kwargs,
     )
 
@@ -1183,4 +1296,6 @@ class PreprocLayer(torch.nn.Module):
         super().__init__()
 
     def forward(self, inp):
-        return torch.tensor(2, device=inp.device, dtype=inp.dtype) * inp - torch.tensor(1, device=inp.device, dtype=inp.dtype)
+        _2 = torch.tensor(2, device=inp.device, dtype=inp.dtype)
+        _1 = torch.tensor(1, device=inp.device, dtype=inp.dtype)
+        return _2 * inp - _1

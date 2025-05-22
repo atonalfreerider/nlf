@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 from simplepyutils import FLAGS
 
-import nlf.tf.augmentation.appearance as appearance_aug
+import nlf.common.augmentation.appearance as appearance_aug
 from nlf.tf.loading.common import augment_background, look_at_box, sparse_matrix_to_dict, \
     recolor_border
-from nlf.tf import improc, util
-from nlf.tf.util import TRAIN
+from nlf.common import improc, util
+from nlf.common.util import TRAIN
 from nlf.tf.loading.parametric import random_canonical_points
 
 
@@ -35,7 +35,9 @@ def load_kp(ex, joint_info, learning_phase, rng):
         # hard to process with the limited simultaneous dynamic range of float32).
         # They are stored in float64 but the processing is done in float32 here.
         world_coords -= ex.camera.t
+        world_coords = world_coords.astype(np.float32)
         ex.camera.t[:] = 0
+        ex.camera.t = ex.camera.t.astype(np.float32)
 
     orig_cam = ex.camera
     bbox = ex.bbox
@@ -87,7 +89,7 @@ def load_kp(ex, joint_info, learning_phase, rng):
 
     im = cameralib.reproject_image(
         im, orig_cam, cam, imshape, antialias_factor=antialias, interp=interp,
-        border_value=border_value)
+        border_value=FLAGS.border_value)
 
     # Color adjustment
     if re.match('.*mupots/TS[1-5]/.+', ex.image_path):

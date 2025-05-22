@@ -19,8 +19,6 @@ def initialize():
     parser.add_argument('--num-betas', type=int, default=32)
     parser.add_argument('--l2-regul', type=float, default=5e-2)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():

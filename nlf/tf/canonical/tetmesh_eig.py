@@ -1,10 +1,13 @@
+import argparse
+
 import numpy as np
+import scipy.sparse as sparse
+import sksparse.cholmod
 import tetgen
 from scipy.sparse.linalg import LinearOperator, eigsh
+
 from nlf.paths import PROJDIR
-import sksparse.cholmod
-import scipy.sparse as sparse
-import argparse
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -31,6 +34,7 @@ def save_tetmesh():
     np.save(f'{PROJDIR}/canonical_nodes3.npy', nodes)
     np.save(f'{PROJDIR}/canonical_elems3.npy', elem)
 
+
 def save_laplacian_eig():
     nodes = np.load(f'{PROJDIR}/canonical_nodes3.npy')
     elem = np.load(f'{PROJDIR}/canonical_elems3.npy')
@@ -42,14 +46,17 @@ def save_laplacian_eig():
     np.save(f'{PROJDIR}/canonical_eigval3.npy', tet_eigva)
     np.save(f'{PROJDIR}/canonical_eigvec3.npy', tet_eigve)
 
+
 def eigs(stiffness, mass, k: int = 10):
     sigma = -0.01
     print("Computing Cholesky decomposition using scikit-sparse cholmod...")
     chol = sksparse.cholmod.cholesky(stiffness - sigma * mass, use_long=True)
     op_inv = LinearOperator(matvec=chol, shape=stiffness.shape, dtype=stiffness.dtype)
 
-    print("Computing eigenvalues and eigenvectors...\n"
-          "This takes 1 hour 20 minutes on an AMD Ryzen 9 5900X CPU.")
+    print(
+        "Computing eigenvalues and eigenvectors...\n"
+        "This takes 1 hour 20 minutes on an AMD Ryzen 9 5900X CPU."
+    )
     eigenvalues, eigenvectors = eigsh(stiffness, k, mass, sigma=sigma, OPinv=op_inv, tol=1e-1)
     return eigenvalues, eigenvectors
 
@@ -114,12 +121,12 @@ def fem_tetra(nodes, elems):
     local_a = np.column_stack(
         (a12, a12, a23, a23, a13, a13, a14, a14, a24, a24, a34, a34, a11, a22, a33, a44)
     ).reshape(-1)
-    i = np.column_stack(
-        (t1, t2, t2, t3, t3, t1, t1, t4, t2, t4, t3, t4, t1, t2, t3, t4)
-    ).reshape(-1)
-    j = np.column_stack(
-        (t2, t1, t3, t2, t1, t3, t4, t1, t4, t2, t4, t3, t1, t2, t3, t4)
-    ).reshape(-1)
+    i = np.column_stack((t1, t2, t2, t3, t3, t1, t1, t4, t2, t4, t3, t4, t1, t2, t3, t4)).reshape(
+        -1
+    )
+    j = np.column_stack((t2, t1, t3, t2, t1, t3, t4, t1, t4, t2, t4, t3, t1, t2, t3, t4)).reshape(
+        -1
+    )
     local_a = local_a / 6.0
     # Construct sparse matrix:
     a = sparse.csc_matrix((local_a, (i, j)))

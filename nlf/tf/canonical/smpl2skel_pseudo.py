@@ -16,11 +16,11 @@ import more_itertools
 import numpy as np
 import simplepyutils as spu
 import tensorflow as tf
-from affine_combining_autoencoder import AffineCombiningRegressor, AffineCombiningRegressorTrainer
 from posepile.ds.surreal import main as surreal
 
 from nlf.paths import DATA_ROOT, PROJDIR
 from nlf.tf import tfu, tfu3d
+from nlf.tf.canonical.acr import AffineCombiningRegressor, AffineCombiningRegressorTrainer
 
 
 def main():
@@ -34,27 +34,25 @@ def main():
     # The HDF5 file contain predictions made by MeTRAbs-ACAE on the SURREAL dataset.
     h5path = 'pred_surreal.h5'
     batch_size = 64
-    ds = hdf5_as_tf_dataset(
-        h5path,
-        ['coords3d_true_cam', 'coords3d_pred_cam', 'image_path'])
+    ds = hdf5_as_tf_dataset(h5path, ['coords3d_true_cam', 'coords3d_pred_cam', 'image_path'])
     ds = ds.filter(was_pose_estimation_successful)
 
     def transform(inp):
         return dict(
             pose3d_in=tf.gather(inp['coords3d_true_cam'][24:], perm_mesh, axis=0),
-            pose3d_out=tf.gather(inp['coords3d_pred_cam'], perm_huge8, axis=0))
+            pose3d_out=tf.gather(inp['coords3d_pred_cam'], perm_huge8, axis=0),
+        )
 
     train_ds = (
-        ds.
-        filter(
-            lambda x: tf.strings.regex_full_match(x['image_path'], b'.+surreal/train.+')).
-        map(transform).
-        cache(f'{DATA_ROOT}/cache/surreal_for_regressor_finetuned'))
+        ds.filter(lambda x: tf.strings.regex_full_match(x['image_path'], b'.+surreal/train.+'))
+        .map(transform)
+        .cache(f'{DATA_ROOT}/cache/surreal_for_regressor_finetuned')
+    )
     val_ds = (
-        ds.
-        filter(lambda x: tf.strings.regex_full_match(x['image_path'], b'.+surreal/val.+')).
-        map(transform).
-        cache())
+        ds.filter(lambda x: tf.strings.regex_full_match(x['image_path'], b'.+surreal/val.+'))
+        .map(transform)
+        .cache()
+    )
 
     n_train = more_itertools.ilen(train_ds)
     steps_per_epoch = n_train // batch_size
@@ -67,14 +65,23 @@ def main():
 
     canonical_verts = np.load(f'{PROJDIR}/canonical_vertices_smpl.npy')
     trainer = AffineCombiningRegressorTrainer(
-        model, regul_lambda=0, supp_lambda=3e-1, random_seed=0,
-        pose3d_template=canonical_verts[perm_mesh].copy() * 1000)
+        model,
+        regul_lambda=0,
+        supp_lambda=3e-1,
+        random_seed=0,
+        pose3d_template=canonical_verts[perm_mesh].copy() * 1000,
+    )
     trainer.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule()))
 
     hist = trainer.fit_epochless(
-        train_ds, validation_data=val_ds, validation_steps=n_val // batch_size,
-        validation_freq=150, steps=steps_per_epoch, verbose=1,
-        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()])
+        train_ds,
+        validation_data=val_ds,
+        validation_steps=n_val // batch_size,
+        validation_freq=150,
+        steps=steps_per_epoch,
+        verbose=1,
+        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()],
+    )
 
     trainer.evaluate(val_ds, steps=n_val // batch_size)
     model.layer.threshold_for_sparsity(1e-3)
@@ -82,18 +89,28 @@ def main():
 
     trainer.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=30))
     hist2 = trainer.fit_epochless(
-        train_ds, validation_data=val_ds, validation_steps=n_val // batch_size,
-        validation_freq=150, steps=steps_per_epoch, verbose=1,
-        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()])
+        train_ds,
+        validation_data=val_ds,
+        validation_steps=n_val // batch_size,
+        validation_freq=150,
+        steps=steps_per_epoch,
+        verbose=1,
+        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()],
+    )
 
     trainer.evaluate(val_ds, steps=n_val // batch_size)
     model.layer.threshold_for_sparsity(1e-3)
     trainer.evaluate(val_ds, steps=n_val // batch_size)
 
     hist3 = trainer.fit_epochless(
-        train_ds, validation_data=val_ds, validation_steps=n_val // batch_size,
-        validation_freq=150, steps=steps_per_epoch, verbose=1,
-        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()])
+        train_ds,
+        validation_data=val_ds,
+        validation_steps=n_val // batch_size,
+        validation_freq=150,
+        steps=steps_per_epoch,
+        verbose=1,
+        callbacks=[fleras.callbacks.ProgbarLogger(), tf.keras.callbacks.History()],
+    )
 
     w = model.layer.get_w().numpy()
     w_backperm = w[invperm_mesh][:, invperm_huge8]
@@ -113,7 +130,8 @@ def was_pose_estimation_successful(ex):
     pose_smpl_true = ex['coords3d_true_cam'][:24]
     pose_smpl_pred = ex['coords3d_pred_cam'][:24]
     pose_smpl_pred_aligned = tfu3d.rigid_align(
-        pose_smpl_pred[tf.newaxis], pose_smpl_true[tf.newaxis], scale_align=True)
+        pose_smpl_pred[tf.newaxis], pose_smpl_true[tf.newaxis], scale_align=True
+    )
     dist = tf.linalg.norm(pose_smpl_true - pose_smpl_pred_aligned, axis=-1)
     return tf.reduce_mean(tfu.auc(dist, 0, 150)) > 0.5
 
@@ -130,10 +148,10 @@ def hdf5_as_tf_dataset(filepath, hdf5_dataset_names=None):
 
         output_signature = {
             name: tf.TensorSpec(shape=f[name].shape[1:], dtype=f[name].dtype)
-            for name in hdf5_dataset_names}
+            for name in hdf5_dataset_names
+        }
 
-    return tf.data.Dataset.from_generator(
-        generator, output_signature=output_signature)
+    return tf.data.Dataset.from_generator(generator, output_signature=output_signature)
 
 
 def get_permutation(ji):
@@ -142,3 +160,7 @@ def get_permutation(ji):
     center_ids = [i for i, name in enumerate(ji.names) if name[0] not in 'lr']
     permutation = left_ids + right_ids + center_ids
     return permutation
+
+
+if __name__ == '__main__':
+    main()

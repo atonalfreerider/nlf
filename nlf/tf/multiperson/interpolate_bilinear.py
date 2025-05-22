@@ -18,8 +18,7 @@
 import tensorflow as tf
 
 
-def interpolate_bilinear(
-        grid, query_points, indexing="ij", border_value=0, name=None):
+def interpolate_bilinear(grid, query_points, indexing="ij", border_value=0, name=None):
     """Similar to Matlab's interp2 function.
 
     Finds values for query points on a grid using bilinear interpolation.
@@ -60,7 +59,6 @@ def interpolate_bilinear(
         index_order = [0, 1] if indexing == "ij" else [1, 0]
         unstacked_query_points = tf.unstack(query_points, axis=2, num=2)
 
-
         for i, dim in enumerate(index_order):
             with tf.name_scope("dim-" + str(dim)):
                 queries = unstacked_query_points[dim]
@@ -80,9 +78,7 @@ def interpolate_bilinear(
                 alphas.append(alpha)
 
             flattened_grid = tf.reshape(grid, [batch_size * height * width, channels])
-            batch_offsets = tf.reshape(
-                tf.range(batch_size) * height * width, [batch_size, 1]
-            )
+            batch_offsets = tf.reshape(tf.range(batch_size) * height * width, [batch_size, 1])
 
         # This wraps tf.gather. We reshape the image data such that the
         # batch, y, and x coordinates are pulled into the first dimension.
@@ -92,18 +88,21 @@ def interpolate_bilinear(
             with tf.name_scope("gather-" + name):
                 linear_coordinates = batch_offsets + y_coords * width + x_coords
                 linear_coordinates = tf.clip_by_value(
-                    linear_coordinates, 0, batch_size * height * width - 1)
+                    linear_coordinates, 0, batch_size * height * width - 1
+                )
                 gathered_values = tf.gather(flattened_grid, linear_coordinates)
 
                 is_at_edge_y = tf.logical_or(y_coords < 0, y_coords >= height)
                 is_at_edge_x = tf.logical_or(x_coords < 0, x_coords >= width)
                 is_at_edge = tf.logical_or(is_at_edge_y, is_at_edge_x)
 
-                #if noise_border:
+                # if noise_border:
                 # random_values = tf.random.uniform(tf.shape(gathered_values), dtype=grid_type)
                 gathered_values = tf.where(
                     is_at_edge[..., tf.newaxis],
-                    tf.cast(border_value, gathered_values.dtype), gathered_values)
+                    tf.cast(border_value, gathered_values.dtype),
+                    gathered_values,
+                )
                 return tf.reshape(gathered_values, [batch_size, num_queries, channels])
 
         # grab the pixel values in the 4 corners around each query point

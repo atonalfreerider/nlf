@@ -5,10 +5,10 @@ import cv2
 import numpy as np
 from simplepyutils import FLAGS
 
-import nlf.tf.augmentation.appearance as appearance_aug
+import nlf.common.augmentation.appearance as appearance_aug
 from nlf.tf.loading.common import recolor_border
-from nlf.tf import improc, util
-from nlf.tf.util import TRAIN
+from nlf.common import improc, util
+from nlf.common.util import TRAIN
 from nlf.tf.loading.parametric import random_canonical_points
 from nlf.tf.loading.common import sparse_matrix_to_dict
 
@@ -98,7 +98,7 @@ def load_2d(ex, joint_info, full_joint_info, learning_phase, rng):
 
     im = cameralib.reproject_image(
         im_from_file, orig_cam, cam, (FLAGS.proc_side, FLAGS.proc_side),
-        antialias_factor=antialias, interp=interp, border_value=border_value)
+        antialias_factor=antialias, interp=interp, border_value=FLAGS.border_value)
 
     # Occlusion and color augmentation
     im = appearance_aug.augment_appearance(

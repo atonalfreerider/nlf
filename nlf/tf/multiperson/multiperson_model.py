@@ -25,15 +25,19 @@ class MultipersonNLF(tf.Module):
 
         self.per_skeleton_indices = {
             k: tf.Variable(v['indices'], dtype=tf.int32, trainable=False)
-            for k, v in skeleton_infos.items()}
+            for k, v in skeleton_infos.items()
+        }
         self.per_skeleton_joint_names = {
             k: tf.Variable(v['names'], dtype=tf.string, trainable=False)
-            for k, v in skeleton_infos.items()}
+            for k, v in skeleton_infos.items()
+        }
         self.per_skeleton_joint_edges = {
             k: tf.Variable(v['edges'], dtype=tf.int32, trainable=False)
-            for k, v in skeleton_infos.items()}
+            for k, v in skeleton_infos.items()
+        }
         self.skeleton_joint_indices_table = tfu.make_tf_hash_table(
-            {k: v['indices'] for k, v in skeleton_infos.items()})
+            {k: v['indices'] for k, v in skeleton_infos.items()}
+        )
 
         projdir = f'{DATA_ROOT}/projects/localizerfields'
         cano_verts = np.load(f'{projdir}/canonical_verts/smpl.npy')
@@ -42,98 +46,166 @@ class MultipersonNLF(tf.Module):
         weights = self.crop_model.get_weights_for_canonical_points(cano_all)
         self.smpl_weights = {
             k: tf.Variable(v.numpy(), dtype=tf.float16, trainable=False)
-            for k, v in weights.items()}
+            for k, v in weights.items()
+        }
 
     @tf.function(input_signature=[tf.TensorSpec(shape=(), dtype=tf.string, name='skeleton')])
     def get_canonical_points(self, skeleton):
         indices = tfu.lookup_tf_hash_table(self.skeleton_joint_indices_table, skeleton)
         return tf.gather(self.crop_model.get_canonical_locs(), indices, axis=0)
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, 3), dtype=tf.float32),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, 3), dtype=tf.float32),
+        ]
+    )
     def get_weights_for_canonical_points(self, canonical_points):
         return self.crop_model.get_weights_for_canonical_points(canonical_points)
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
-        dict(
-            w_tensor=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-            w_tensor_flipped=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-        ),
-        tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
+            dict(
+                w_tensor=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+                w_tensor_flipped=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+            ),
+            tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
+        ]
+    )
     def detect_poses_batched(
-            self, images, weights,
-            intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
-            distortion_coeffs=(DEFAULT_DISTORTION,), extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1, detector_threshold=0.3,
-            detector_nms_iou_threshold=0.7, max_detections=-1, detector_flip_aug=False,
-            detector_both_flip_aug=False, suppress_implausible_poses=True):
+        self,
+        images,
+        weights,
+        intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
+        distortion_coeffs=(DEFAULT_DISTORTION,),
+        extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        detector_threshold=0.3,
+        detector_nms_iou_threshold=0.7,
+        max_detections=-1,
+        detector_flip_aug=False,
+        detector_both_flip_aug=False,
+        suppress_implausible_poses=True,
+    ):
         boxes = self._get_boxes(
-            images, detector_flip_aug, detector_both_flip_aug, detector_nms_iou_threshold,
-            detector_threshold, max_detections, extrinsic_matrix, world_up_vector)
+            images,
+            detector_flip_aug,
+            detector_both_flip_aug,
+            detector_nms_iou_threshold,
+            detector_threshold,
+            max_detections,
+            extrinsic_matrix,
+            world_up_vector,
+        )
         return self._estimate_poses_batched(
-            images, weights, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor, num_aug,
-            suppress_implausible_poses)
+            images,
+            weights,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            suppress_implausible_poses,
+        )
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
-        tf.RaggedTensorSpec(shape=(None, None, 4), ragged_rank=1, dtype=tf.float32),  # boxes
-        dict(
-            w_tensor=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-            w_tensor_flipped=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-        ),
-        tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
+            tf.RaggedTensorSpec(shape=(None, None, 4), ragged_rank=1, dtype=tf.float32),  # boxes
+            dict(
+                w_tensor=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+                w_tensor_flipped=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+            ),
+            tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+        ]
+    )
     def estimate_poses_batched(
-            self, images, boxes, weights,
-            intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
-            distortion_coeffs=(DEFAULT_DISTORTION,),
-            extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,), world_up_vector=DEFAULT_WORLD_UP,
-            default_fov_degrees=55, internal_batch_size=64, antialias_factor=1, num_aug=1):
+        self,
+        images,
+        boxes,
+        weights,
+        intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
+        distortion_coeffs=(DEFAULT_DISTORTION,),
+        extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+    ):
         boxes = tf.concat([boxes, tf.ones_like(boxes[..., :1])], axis=-1)
         pred = self._estimate_poses_batched(
-            images, weights, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor, num_aug,
-            suppress_implausible_poses=False)
+            images,
+            weights,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            suppress_implausible_poses=False,
+        )
         del pred['boxes']
         return pred
 
     def _estimate_poses_batched(
-            self, images, weights, boxes, intrinsic_matrix, distortion_coeffs,
-            extrinsic_matrix, world_up_vector, default_fov_degrees, internal_batch_size,
-            antialias_factor, num_aug, suppress_implausible_poses):
+        self,
+        images,
+        weights,
+        boxes,
+        intrinsic_matrix,
+        distortion_coeffs,
+        extrinsic_matrix,
+        world_up_vector,
+        default_fov_degrees,
+        internal_batch_size,
+        antialias_factor,
+        num_aug,
+        suppress_implausible_poses,
+    ):
         # Special case when zero boxes are provided or found
         # (i.e., all images without person detections)
         # This must be explicitly handled, else the shapes don't work out automatically
@@ -147,7 +219,8 @@ class MultipersonNLF(tf.Module):
             # If intrinsic_matrix is not given, fill it in based on field of view
             if tf.reduce_all(intrinsic_matrix == -1):
                 intrinsic_matrix = tfu3d.intrinsic_matrix_from_field_of_view(
-                    default_fov_degrees, tf.shape(images)[1:3])
+                    default_fov_degrees, tf.shape(images)[1:3]
+                )
             intrinsic_matrix = tf.repeat(intrinsic_matrix, n_images, axis=0)
 
         # If one distortion coeff/extrinsic matrix is given, repeat it for all images
@@ -172,17 +245,20 @@ class MultipersonNLF(tf.Module):
             num_aug_normal = num_aug // 2
             aug_angle_range_normal = np.float32(np.deg2rad(FLAGS.rot_aug))
             aug_angles_normal = tfu.linspace(
-                -aug_angle_range_normal, aug_angle_range_normal, num_aug_normal)
+                -aug_angle_range_normal, aug_angle_range_normal, num_aug_normal
+            )
 
             num_aug_360 = num_aug - num_aug_normal
-            aug_angle_range_360 = (
-                    tf.cast(np.pi, tf.float32) * (1 - 1 / tf.cast(num_aug_360, tf.float32)))
+            aug_angle_range_360 = tf.cast(np.pi, tf.float32) * (
+                1 - 1 / tf.cast(num_aug_360, tf.float32)
+            )
             aug_angles_360 = tfu.linspace(-aug_angle_range_360, aug_angle_range_360, num_aug_360)
 
             aug_angles = tf.sort(tf.concat([aug_angles_normal, aug_angles_360], axis=0))
         elif FLAGS.rot_aug_360:
-            aug_angle_range_360 = (
-                    tf.cast(np.pi, tf.float32) * (1 - 1 / tf.cast(num_aug, tf.float32)))
+            aug_angle_range_360 = tf.cast(np.pi, tf.float32) * (
+                1 - 1 / tf.cast(num_aug, tf.float32)
+            )
             aug_angles = tfu.linspace(-aug_angle_range_360, aug_angle_range_360, num_aug)
         else:
             aug_angle_range = np.float32(np.deg2rad(FLAGS.rot_aug))
@@ -191,21 +267,36 @@ class MultipersonNLF(tf.Module):
         if num_aug == 1:
             aug_scales = tf.constant([1.0], np.float32)
         else:
-            aug_scales = tf.concat([
-                tfu.linspace(0.8, 1.0, num_aug // 2, endpoint=False),
-                tfu.linspace(1.0, 1.1, num_aug - num_aug // 2)], axis=0)
+            aug_scales = tf.concat(
+                [
+                    tfu.linspace(0.8, 1.0, num_aug // 2, endpoint=False),
+                    tfu.linspace(1.0, 1.1, num_aug - num_aug // 2),
+                ],
+                axis=0,
+            )
 
         aug_should_flip = (tf.range(num_aug) - num_aug // 2) % 2 != 0
         aug_flipmat = tf.constant([[-1, 0, 0], [0, 1, 0], [0, 0, 1]], np.float32)
         aug_maybe_flipmat = tf.where(
-            aug_should_flip[:, np.newaxis, np.newaxis], aug_flipmat, tf.eye(3))
+            aug_should_flip[:, np.newaxis, np.newaxis], aug_flipmat, tf.eye(3)
+        )
         aug_rotmat = tfu3d.rotation_mat(-aug_angles, rot_axis='z')
         aug_rotflipmat = aug_maybe_flipmat @ aug_rotmat
 
         poses3d_flat, uncert_flat = self._predict_in_batches(
-            images, weights,
-            intrinsic_matrix_rep, distortion_coeffs_rep, camspace_up, boxes, internal_batch_size,
-            aug_should_flip, aug_rotflipmat, aug_gammas, aug_scales, antialias_factor)
+            images,
+            weights,
+            intrinsic_matrix_rep,
+            distortion_coeffs_rep,
+            camspace_up,
+            boxes,
+            internal_batch_size,
+            aug_should_flip,
+            aug_rotflipmat,
+            aug_gammas,
+            aug_scales,
+            antialias_factor,
+        )
         # if FLAGS.return_crops:
         #     crops_flat, poses3d_flat = poses3d_flat
         #     crops = tf.RaggedTensor.from_row_lengths(crops_flat, n_box_per_image)
@@ -215,16 +306,20 @@ class MultipersonNLF(tf.Module):
         mean = tf.reduce_mean(poses3d_flat, axis=(-3, -2), keepdims=True)
         poses3d_flat_submean = tf.cast(poses3d_flat - mean, tf.float32)
         poses3d_flat_submean, final_weights = weighted_geometric_median(
-            poses3d_flat_submean, uncert_flat ** -1.5, axis=-3, n_iter=10, eps=50)
+            poses3d_flat_submean, uncert_flat**-1.5, axis=-3, n_iter=10, eps=50
+        )
         poses3d_flat = tf.cast(poses3d_flat_submean, tf.float64) + tf.squeeze(mean, 1)
         uncert_flat = weighted_mean(uncert_flat, final_weights, axis=-2)
 
         # Project the 3D poses to get the 2D poses
         poses2d_flat_normalized = tfu3d.to_homogeneous(
-            warping.distort_points(tfu3d.project(tf.cast(poses3d_flat, tf.float32)),
-                                   distortion_coeffs_rep))
+            warping.distort_points(
+                tfu3d.project(tf.cast(poses3d_flat, tf.float32)), distortion_coeffs_rep
+            )
+        )
         poses2d_flat = tf.einsum(
-            'bnk,bjk->bnj', poses2d_flat_normalized, intrinsic_matrix_rep[:, :2, :])
+            'bnk,bjk->bnj', poses2d_flat_normalized, intrinsic_matrix_rep[:, :2, :]
+        )
         poses2d_flat = tf.ensure_shape(poses2d_flat, [None, None, 2])
 
         # Arrange the results back into ragged tensors
@@ -235,50 +330,77 @@ class MultipersonNLF(tf.Module):
         if suppress_implausible_poses:
             # Filter the resulting poses for individual plausibility to reduce false positives
             selected_indices = self._filter_poses(
-                boxes, tf.cast(poses3d, tf.float32), poses2d, uncert)
+                boxes, tf.cast(poses3d, tf.float32), poses2d, uncert
+            )
             boxes, poses3d, poses2d, uncert = [
                 tf.gather(x, selected_indices, batch_dims=1)
-                for x in [boxes, poses3d, poses2d, uncert]]
+                for x in [boxes, poses3d, poses2d, uncert]
+            ]
             # if FLAGS.return_crops:
             #     crops = tf.gather(crops, selected_indices, batch_dims=1)
 
         # Convert to world coordinates CHECK, maybe this should be tile, not repeat
         inv_extrinsic_matrix = tf.repeat(
-            tf.linalg.inv(tf.cast(extrinsic_matrix, tf.float64)),
-            poses3d.row_lengths(), axis=0)
+            tf.linalg.inv(tf.cast(extrinsic_matrix, tf.float64)), poses3d.row_lengths(), axis=0
+        )
         poses3d_flat = poses3d.flat_values
         poses3d_flat = tf.einsum(
-            'bnk,bjk->bnj', tfu3d.to_homogeneous(poses3d_flat), inv_extrinsic_matrix[:, :3, :])
+            'bnk,bjk->bnj', tfu3d.to_homogeneous(poses3d_flat), inv_extrinsic_matrix[:, :3, :]
+        )
         poses3d_flat = tf.cast(poses3d_flat, tf.float32)
         poses3d = tf.RaggedTensor.from_row_splits(poses3d_flat, poses3d.row_splits)
 
-        result = dict(
-            boxes=boxes, poses3d=poses3d, poses2d=poses2d, uncertainties=uncert)
+        result = dict(boxes=boxes, poses3d=poses3d, poses2d=poses2d, uncertainties=uncert)
         # if FLAGS.return_crops:
         #     result['crops'] = crops
         return result
 
     def _get_boxes(
-            self, images, detector_flip_aug, detector_both_flip_aug, detector_nms_iou_threshold,
-            detector_threshold, max_detections, extrinsic_matrix, world_up_vector):
+        self,
+        images,
+        detector_flip_aug,
+        detector_both_flip_aug,
+        detector_nms_iou_threshold,
+        detector_threshold,
+        max_detections,
+        extrinsic_matrix,
+        world_up_vector,
+    ):
         if self.detector is None:
             n_images = tf.shape(images)[0]
             boxes = tf.RaggedTensor.from_row_lengths(
-                tf.zeros(shape=(0, 5)), tf.zeros(n_images, tf.int64))
+                tf.zeros(shape=(0, 5)), tf.zeros(n_images, tf.int64)
+            )
         else:
             boxes = self.detector.predict_multi_image(
-                images, detector_threshold, detector_nms_iou_threshold, detector_flip_aug,
-                detector_both_flip_aug, extrinsic_matrix=extrinsic_matrix,
-                world_up_vector=world_up_vector)
+                images,
+                detector_threshold,
+                detector_nms_iou_threshold,
+                detector_flip_aug,
+                detector_both_flip_aug,
+                extrinsic_matrix=extrinsic_matrix,
+                world_up_vector=world_up_vector,
+            )
             if max_detections > -1 and not tf.size(boxes) == 0:
                 topk_indices = tfu.topk_indices_ragged(boxes[..., 4], max_detections)
                 boxes = tf.gather(boxes, topk_indices, axis=1, batch_dims=1)
         return boxes
 
     def _predict_in_batches(
-            self, images, weights, intrinsic_matrix, distortion_coeffs, camspace_up, boxes,
-            internal_batch_size, aug_should_flip, aug_rotflipmat, aug_gammas, aug_scales,
-            antialias_factor):
+        self,
+        images,
+        weights,
+        intrinsic_matrix,
+        distortion_coeffs,
+        camspace_up,
+        boxes,
+        internal_batch_size,
+        aug_should_flip,
+        aug_rotflipmat,
+        aug_gammas,
+        aug_scales,
+        antialias_factor,
+    ):
 
         num_aug = tf.shape(aug_gammas)[0]
         boxes_per_batch = internal_batch_size // num_aug
@@ -291,10 +413,19 @@ class MultipersonNLF(tf.Module):
         if boxes_per_batch == 0:
             # Run all as a single batch
             poses3d, uncert = self._predict_single_batch(
-                images, weights, intrinsic_matrix, distortion_coeffs, camspace_up,
+                images,
+                weights,
+                intrinsic_matrix,
+                distortion_coeffs,
+                camspace_up,
                 boxes_flat,
-                image_id_per_box, aug_rotflipmat, aug_should_flip, aug_scales, aug_gammas,
-                antialias_factor)
+                image_id_per_box,
+                aug_rotflipmat,
+                aug_should_flip,
+                aug_scales,
+                aug_gammas,
+                antialias_factor,
+            )
             # if FLAGS.return_crops:
             #     crops, poses3d = poses3d
             #     return (crops, poses3d), uncert
@@ -309,11 +440,11 @@ class MultipersonNLF(tf.Module):
             #    3),
             #    infer_shape=False)
             poses3d_batches = tf.TensorArray(
-                tf.float64, size=n_batches, element_shape=(None, None, None, 3),
-                infer_shape=False)
+                tf.float64, size=n_batches, element_shape=(None, None, None, 3), infer_shape=False
+            )
             uncert_batches = tf.TensorArray(
-                tf.float32, size=n_batches, element_shape=(None, None, None),
-                infer_shape=False)
+                tf.float32, size=n_batches, element_shape=(None, None, None), infer_shape=False
+            )
 
             # if FLAGS.return_crops:
             #     crop_batches = tf.TensorArray(
@@ -326,11 +457,19 @@ class MultipersonNLF(tf.Module):
                 batch_slice = slice(i * boxes_per_batch, (i + 1) * boxes_per_batch)
 
                 poses3d, uncert = self._predict_single_batch(
-                    images, weights, intrinsic_matrix[batch_slice],
+                    images,
+                    weights,
+                    intrinsic_matrix[batch_slice],
                     distortion_coeffs[batch_slice],
-                    camspace_up[batch_slice], boxes_flat[batch_slice],
-                    image_id_per_box[batch_slice], aug_rotflipmat, aug_should_flip, aug_scales,
-                    aug_gammas, antialias_factor)
+                    camspace_up[batch_slice],
+                    boxes_flat[batch_slice],
+                    image_id_per_box[batch_slice],
+                    aug_rotflipmat,
+                    aug_should_flip,
+                    aug_scales,
+                    aug_gammas,
+                    antialias_factor,
+                )
                 # if FLAGS.return_crops:
                 #     crops, poses3d = poses3d
 
@@ -345,13 +484,34 @@ class MultipersonNLF(tf.Module):
             return poses3d_batches.concat(), uncert_batches.concat()
 
     def _predict_single_batch(
-            self, images, weights, intrinsic_matrix, distortion_coeffs, camspace_up, boxes,
-            image_ids, aug_rotflipmat, aug_should_flip, aug_scales, aug_gammas, antialias_factor):
+        self,
+        images,
+        weights,
+        intrinsic_matrix,
+        distortion_coeffs,
+        camspace_up,
+        boxes,
+        image_ids,
+        aug_rotflipmat,
+        aug_should_flip,
+        aug_scales,
+        aug_gammas,
+        antialias_factor,
+    ):
         # Get crops and info about the transformation used to create them
         # Each has shape [num_aug, n_boxes, ...]
         crops, new_intrinsic_matrix, R = self._get_crops(
-            images, intrinsic_matrix, distortion_coeffs, camspace_up, boxes, image_ids,
-            aug_rotflipmat, aug_scales, aug_gammas, antialias_factor)
+            images,
+            intrinsic_matrix,
+            distortion_coeffs,
+            camspace_up,
+            boxes,
+            image_ids,
+            aug_rotflipmat,
+            aug_scales,
+            aug_gammas,
+            antialias_factor,
+        )
 
         res = self.crop_model.input_resolution
         crops_flat = tf.reshape(crops, (-1, res, res, 3))
@@ -360,8 +520,8 @@ class MultipersonNLF(tf.Module):
 
         aug_should_flip_flat = tf.repeat(aug_should_flip, n_cases, axis=0)
         poses_flat, uncert_flat = self.crop_model.predict_multi_same_weights(
-            tf.cast(crops_flat, dtype), new_intrinsic_matrix_flat, weights,
-            aug_should_flip_flat)
+            tf.cast(crops_flat, dtype), new_intrinsic_matrix_flat, weights, aug_should_flip_flat
+        )
         poses_flat = tf.cast(poses_flat, tf.float64)
         n_joints = tf.shape(poses_flat)[-2]
 
@@ -372,10 +532,21 @@ class MultipersonNLF(tf.Module):
         return tf.transpose(poses_orig_camspace, [1, 0, 2, 3]), tf.transpose(uncert, [1, 0, 2])
 
     def _get_crops(
-            self, images, intrinsic_matrix, distortion_coeffs, camspace_up, boxes, image_ids,
-            aug_rotflipmat, aug_scales, aug_gammas, antialias_factor):
+        self,
+        images,
+        intrinsic_matrix,
+        distortion_coeffs,
+        camspace_up,
+        boxes,
+        image_ids,
+        aug_rotflipmat,
+        aug_scales,
+        aug_gammas,
+        antialias_factor,
+    ):
         R_noaug, box_scales = self._get_new_rotation_and_scale(
-            intrinsic_matrix, distortion_coeffs, camspace_up, boxes)
+            intrinsic_matrix, distortion_coeffs, camspace_up, boxes
+        )
 
         # How much we need to scale overall, taking scale augmentation into account
         # From here on, we introduce the dimension of augmentations
@@ -384,16 +555,29 @@ class MultipersonNLF(tf.Module):
         num_box = tf.shape(boxes)[0]
         num_aug = tf.shape(aug_gammas)[0]
         res = self.crop_model.input_resolution
-        new_intrinsic_matrix = tf.concat([
-            tf.concat([
-                # Top-left of original intrinsic matrix gets scaled
-                intrinsic_matrix[tf.newaxis, :, :2, :2] * crop_scales[:, :, tf.newaxis, tf.newaxis],
-                # Principal point is the middle of the new image size
-                tf.fill((num_aug, num_box, 2, 1), tf.cast(res, tf.float32) / 2)], axis=3),
-            tf.concat([
-                # [0, 0, 1] as the last row of the intrinsic matrix:
-                tf.zeros((num_aug, num_box, 1, 2), tf.float32),
-                tf.ones((num_aug, num_box, 1, 1), tf.float32)], axis=3)], axis=2)
+        new_intrinsic_matrix = tf.concat(
+            [
+                tf.concat(
+                    [
+                        # Top-left of original intrinsic matrix gets scaled
+                        intrinsic_matrix[tf.newaxis, :, :2, :2]
+                        * crop_scales[:, :, tf.newaxis, tf.newaxis],
+                        # Principal point is the middle of the new image size
+                        tf.fill((num_aug, num_box, 2, 1), tf.cast(res, tf.float32) / 2),
+                    ],
+                    axis=3,
+                ),
+                tf.concat(
+                    [
+                        # [0, 0, 1] as the last row of the intrinsic matrix:
+                        tf.zeros((num_aug, num_box, 1, 2), tf.float32),
+                        tf.ones((num_aug, num_box, 1, 1), tf.float32),
+                    ],
+                    axis=3,
+                ),
+            ],
+            axis=2,
+        )
         R = aug_rotflipmat[:, tf.newaxis] @ R_noaug
         new_invprojmat = tf.linalg.inv(new_intrinsic_matrix @ R)
 
@@ -401,7 +585,8 @@ class MultipersonNLF(tf.Module):
         # shrink it. So we scale the homography first.
         if antialias_factor > 1:
             scaling_mat = warping.corner_aligned_scale_mat(
-                1 / tf.cast(antialias_factor, tf.float32))
+                1 / tf.cast(antialias_factor, tf.float32)
+            )
             new_invprojmat = new_invprojmat @ scaling_mat
 
         crops = warping.warp_images_with_pyramid(
@@ -411,7 +596,8 @@ class MultipersonNLF(tf.Module):
             distortion_coeffs=tf.tile(distortion_coeffs, [num_aug, 1]),
             crop_scales=tf.reshape(crop_scales, [-1]) * tf.cast(antialias_factor, tf.float32),
             output_shape=(res * antialias_factor, res * antialias_factor),
-            image_ids=tf.tile(image_ids, [num_aug]))
+            image_ids=tf.tile(image_ids, [num_aug]),
+        )
 
         # Downscale the result if we do antialiasing through output scaling
         if antialias_factor == 2:
@@ -428,27 +614,45 @@ class MultipersonNLF(tf.Module):
     def _get_new_rotation_and_scale(self, intrinsic_matrix, distortion_coeffs, camspace_up, boxes):
         # Transform five points on each box: the center and the four side midpoints
         x, y, w, h = tf.unstack(boxes[:, :4], axis=1)
-        boxpoints_homog = tfu3d.to_homogeneous(tf.reshape(tf.stack([
-            x + w / 2, y + h / 2,
-            x + w / 2, y,
-            x + w, y + h / 2,
-            x + w / 2, y + h,
-            x, y + h / 2], axis=1), (-1, 5, 2)))
+        boxpoints_homog = tfu3d.to_homogeneous(
+            tf.reshape(
+                tf.stack(
+                    [
+                        x + w / 2,
+                        y + h / 2,
+                        x + w / 2,
+                        y,
+                        x + w,
+                        y + h / 2,
+                        x + w / 2,
+                        y + h,
+                        x,
+                        y + h / 2,
+                    ],
+                    axis=1,
+                ),
+                (-1, 5, 2),
+            )
+        )
         boxpoints_camspace = tf.einsum(
-            'bpc,bCc->bpC', boxpoints_homog, tf.linalg.inv(intrinsic_matrix))
+            'bpc,bCc->bpC', boxpoints_homog, tf.linalg.inv(intrinsic_matrix)
+        )
         boxpoints_camspace = tfu3d.to_homogeneous(
-            warping.undistort_points(boxpoints_camspace[:, :, :2], distortion_coeffs))
+            warping.undistort_points(boxpoints_camspace[:, :, :2], distortion_coeffs)
+        )
 
         # Create a rotation matrix that will put the box center to the principal point
         # and apply the augmentation rotation and flip, to get the new coordinate frame
         box_center_camspace = boxpoints_camspace[:, 0]
         R_noaug = tfu3d.get_new_rotation_matrix(
-            forward_vector=box_center_camspace, up_vector=camspace_up)
+            forward_vector=box_center_camspace, up_vector=camspace_up
+        )
 
         # Transform the side midpoints of the box to the new coordinate frame
         sidepoints_camspace = boxpoints_camspace[:, 1:5]
-        sidepoints_new = tfu3d.project(tf.einsum(
-            'bpc,bCc->bpC', sidepoints_camspace, intrinsic_matrix @ R_noaug))
+        sidepoints_new = tfu3d.project(
+            tf.einsum('bpc,bCc->bpC', sidepoints_camspace, intrinsic_matrix @ R_noaug)
+        )
 
         # Measure the size of the reprojected boxes
         vertical_size = tf.linalg.norm(sidepoints_new[:, 0] - sidepoints_new[:, 2], axis=-1)
@@ -471,8 +675,7 @@ class MultipersonNLF(tf.Module):
         uncert = tf.RaggedTensor.from_row_lengths(uncert, tf.zeros(n_images, tf.int64))
         boxes = tf.zeros(shape=(0, 5))
         boxes = tf.RaggedTensor.from_row_lengths(boxes, tf.zeros(n_images, tf.int64))
-        result = dict(
-            boxes=boxes, poses3d=poses3d, poses2d=poses2d, uncertainties=uncert)
+        result = dict(boxes=boxes, poses3d=poses3d, poses2d=poses2d, uncertainties=uncert)
 
         # if FLAGS.return_crops:
         #     res = self.crop_model.input_resolution
@@ -488,208 +691,350 @@ class MultipersonNLF(tf.Module):
 
         plausible_mask_flat = tf.logical_and(
             is_uncert_low,
-            plausib.is_pose_consistent_with_box(poses2d.flat_values, boxes.flat_values))
+            plausib.is_pose_consistent_with_box(poses2d.flat_values, boxes.flat_values),
+        )
 
-        plausible_mask = tf.RaggedTensor.from_row_splits(
-            plausible_mask_flat, boxes.row_splits)
+        plausible_mask = tf.RaggedTensor.from_row_splits(plausible_mask_flat, boxes.row_splits)
 
         # Apply pose similarity-based non-maximum suppression to reduce duplicates
         nms_indices = tf.map_fn(
             fn=lambda args: plausib.pose_non_max_suppression(*args),
-            elems=(
-                poses3d, boxes[..., 4] / tf.reduce_mean(uncert, axis=-1), plausible_mask),
+            elems=(poses3d, boxes[..., 4] / tf.reduce_mean(uncert, axis=-1), plausible_mask),
             fn_output_signature=tf.RaggedTensorSpec(shape=(None,), dtype=tf.int32),
-            parallel_iterations=1024)
+            parallel_iterations=1024,
+        )
         return nms_indices
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
-        dict(
-            w_tensor=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-            w_tensor_flipped=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-        ),
-        tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
+            dict(
+                w_tensor=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+                w_tensor_flipped=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+            ),
+            tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
+        ]
+    )
     def detect_poses(
-            self, image, weights, intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
-            distortion_coeffs=DEFAULT_DISTORTION, extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1, detector_threshold=0.3,
-            detector_nms_iou_threshold=0.7, max_detections=-1, detector_flip_aug=False,
-            detector_both_flip_aug=False, suppress_implausible_poses=True):
+        self,
+        image,
+        weights,
+        intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
+        distortion_coeffs=DEFAULT_DISTORTION,
+        extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        detector_threshold=0.3,
+        detector_nms_iou_threshold=0.7,
+        max_detections=-1,
+        detector_flip_aug=False,
+        detector_both_flip_aug=False,
+        suppress_implausible_poses=True,
+    ):
         images = image[tf.newaxis]
         intrinsic_matrix = intrinsic_matrix[tf.newaxis]
         distortion_coeffs = distortion_coeffs[tf.newaxis]
         extrinsic_matrix = extrinsic_matrix[tf.newaxis]
         result = self.detect_poses_batched(
-            images, weights, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
+            images,
+            weights,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
             world_up_vector,
-            default_fov_degrees, internal_batch_size, antialias_factor, num_aug, detector_threshold,
-            detector_nms_iou_threshold, max_detections, detector_flip_aug, detector_both_flip_aug,
-            suppress_implausible_poses)
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            detector_threshold,
+            detector_nms_iou_threshold,
+            max_detections,
+            detector_flip_aug,
+            detector_both_flip_aug,
+            suppress_implausible_poses,
+        )
         return tf.nest.map_structure(lambda x: tf.squeeze(x, 0), result)
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
-        tf.TensorSpec(shape=(None, 4), dtype=tf.float32, name='boxes'),
-        dict(
-            w_tensor=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-            w_tensor_flipped=tf.TensorSpec(
-                shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16),
-            b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
-        ),
-        tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
+            tf.TensorSpec(shape=(None, 4), dtype=tf.float32, name='boxes'),
+            dict(
+                w_tensor=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+                w_tensor_flipped=tf.TensorSpec(
+                    shape=(FLAGS.backbone_link_dim, None, 2 + FLAGS.depth), dtype=tf.float16
+                ),
+                b_tensor_flipped=tf.TensorSpec(shape=(None, 2 + FLAGS.depth), dtype=tf.float16),
+            ),
+            tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+        ]
+    )
     def estimate_poses(
-            self, image, boxes, weights, intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
-            distortion_coeffs=DEFAULT_DISTORTION, extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1):
+        self,
+        image,
+        boxes,
+        weights,
+        intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
+        distortion_coeffs=DEFAULT_DISTORTION,
+        extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+    ):
         images = image[tf.newaxis]
         boxes = tf.RaggedTensor.from_tensor(boxes[tf.newaxis])
         intrinsic_matrix = intrinsic_matrix[tf.newaxis]
         distortion_coeffs = distortion_coeffs[tf.newaxis]
         extrinsic_matrix = extrinsic_matrix[tf.newaxis]
         result = self.estimate_poses_batched(
-            images, boxes, weights, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
+            images,
+            boxes,
+            weights,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
             world_up_vector,
-            default_fov_degrees, internal_batch_size, antialias_factor, num_aug)
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+        )
         return tf.nest.map_structure(lambda x: tf.squeeze(x, 0), result)
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
-        tf.RaggedTensorSpec(shape=(None, None, 4), ragged_rank=1, dtype=tf.float32),  # boxes
-        tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
+            tf.RaggedTensorSpec(shape=(None, None, 4), ragged_rank=1, dtype=tf.float32),  # boxes
+            tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
+        ]
+    )
     def estimate_smpl_batched(
-            self, images, boxes,
-            intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,), distortion_coeffs=(DEFAULT_DISTORTION,),
-            extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,), world_up_vector=DEFAULT_WORLD_UP,
-            default_fov_degrees=55, internal_batch_size=64, antialias_factor=1, num_aug=1,
-            fit_l2_regularizer=1):
+        self,
+        images,
+        boxes,
+        intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
+        distortion_coeffs=(DEFAULT_DISTORTION,),
+        extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        fit_l2_regularizer=1,
+    ):
         boxes = tf.concat([boxes, tf.ones_like(boxes[..., :1])], axis=-1)
         pred = self._estimate_smpl_batched(
-            images, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor,
-            num_aug, suppress_implausible_poses=False,
-            fit_l2_regularizer=fit_l2_regularizer)
+            images,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            suppress_implausible_poses=False,
+            fit_l2_regularizer=fit_l2_regularizer,
+        )
         del pred['boxes']
         return pred
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
-        tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, None, 3), dtype=tf.uint8, name='images'),
+            tf.TensorSpec(shape=(None, 3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None, None), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(None, 4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
+        ]
+    )
     def detect_smpl_batched(
-            self, images, intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
-            distortion_coeffs=(DEFAULT_DISTORTION,), extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1, detector_threshold=0.3,
-            detector_nms_iou_threshold=0.7, max_detections=-1, detector_flip_aug=False,
-            detector_both_flip_aug=False, suppress_implausible_poses=True, fit_l2_regularizer=10):
+        self,
+        images,
+        intrinsic_matrix=(UNKNOWN_INTRINSIC_MATRIX,),
+        distortion_coeffs=(DEFAULT_DISTORTION,),
+        extrinsic_matrix=(DEFAULT_EXTRINSIC_MATRIX,),
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        detector_threshold=0.3,
+        detector_nms_iou_threshold=0.7,
+        max_detections=-1,
+        detector_flip_aug=False,
+        detector_both_flip_aug=False,
+        suppress_implausible_poses=True,
+        fit_l2_regularizer=10,
+    ):
         boxes = self._get_boxes(
-            images, detector_flip_aug, detector_both_flip_aug, detector_nms_iou_threshold,
-            detector_threshold, max_detections, extrinsic_matrix, world_up_vector)
+            images,
+            detector_flip_aug,
+            detector_both_flip_aug,
+            detector_nms_iou_threshold,
+            detector_threshold,
+            max_detections,
+            extrinsic_matrix,
+            world_up_vector,
+        )
         pred = self._estimate_smpl_batched(
-            images, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor,
-            num_aug, suppress_implausible_poses=suppress_implausible_poses,
-            fit_l2_regularizer=fit_l2_regularizer)
+            images,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            suppress_implausible_poses=suppress_implausible_poses,
+            fit_l2_regularizer=fit_l2_regularizer,
+        )
         del pred['boxes']
         return pred
 
     def _estimate_smpl_batched(
-            self, images, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor,
-            num_aug, suppress_implausible_poses, fit_l2_regularizer):
+        self,
+        images,
+        boxes,
+        intrinsic_matrix,
+        distortion_coeffs,
+        extrinsic_matrix,
+        world_up_vector,
+        default_fov_degrees,
+        internal_batch_size,
+        antialias_factor,
+        num_aug,
+        suppress_implausible_poses,
+        fit_l2_regularizer,
+    ):
 
         result = self._estimate_poses_batched(
-            images, self.smpl_weights, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor, num_aug,
-            suppress_implausible_poses=suppress_implausible_poses)
+            images,
+            self.smpl_weights,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            suppress_implausible_poses=suppress_implausible_poses,
+        )
 
         body_model = smpl.tensorflow.SMPL(model_name='smpl', gender='neutral')
         fitter = smpl.tensorflow.full_fitting.Fitter(body_model, num_betas=10, enable_kid=False)
 
         vertices, joints = tf.split(
-            result['poses3d'] / 1000, [body_model.num_vertices, body_model.num_joints], axis=-2)
+            result['poses3d'] / 1000, [body_model.num_vertices, body_model.num_joints], axis=-2
+        )
         result['vertex_uncertainties'], result['joint_uncertainties'] = tf.split(
-            result['uncertainties'], [body_model.num_vertices, body_model.num_joints], axis=-1)
+            result['uncertainties'], [body_model.num_vertices, body_model.num_joints], axis=-1
+        )
         vertex_weights = result['vertex_uncertainties'] ** -1.5
         vertex_weights = vertex_weights / tf.reduce_mean(vertex_weights, axis=-1, keepdims=True)
         joint_weights = result['joint_uncertainties'] ** -1.5
         joint_weights = joint_weights / tf.reduce_mean(joint_weights, axis=-1, keepdims=True)
 
         fit = fitter.fit(
-            vertices.values, joints_to_fit=joints.values, vertex_weights=vertex_weights.values,
-            joint_weights=joint_weights.values, n_iter=3, l2_regularizer=fit_l2_regularizer,
-            l2_regularizer2=0, allow_nan=True, final_adjust_rots=True,
-            requested_keys=['pose_rotvecs', 'shape_betas', 'trans', 'joints', 'vertices'])
+            vertices.values,
+            joints_to_fit=joints.values,
+            vertex_weights=vertex_weights.values,
+            joint_weights=joint_weights.values,
+            n_iter=3,
+            l2_regularizer=fit_l2_regularizer,
+            l2_regularizer2=0,
+            allow_nan=True,
+            final_adjust_rots=True,
+            requested_keys=['pose_rotvecs', 'shape_betas', 'trans', 'joints', 'vertices'],
+        )
         result['pose'] = tf.RaggedTensor.from_row_splits(fit['pose_rotvecs'], vertices.row_splits)
         result['betas'] = tf.RaggedTensor.from_row_splits(fit['shape_betas'], vertices.row_splits)
         result['trans'] = tf.RaggedTensor.from_row_splits(fit['trans'], vertices.row_splits)
-        result['vertices3d'] = tf.RaggedTensor.from_row_splits(fit['vertices'], vertices.row_splits)
+        result['vertices3d'] = tf.RaggedTensor.from_row_splits(
+            fit['vertices'], vertices.row_splits
+        )
         result['joints3d'] = tf.RaggedTensor.from_row_splits(fit['joints'], vertices.row_splits)
         result['vertices2d'] = project_ragged(
-            images, result['vertices3d'], extrinsic_matrix, intrinsic_matrix, distortion_coeffs,
-            default_fov_degrees)
+            images,
+            result['vertices3d'],
+            extrinsic_matrix,
+            intrinsic_matrix,
+            distortion_coeffs,
+            default_fov_degrees,
+        )
         result['joints2d'] = project_ragged(
-            images, result['joints3d'], extrinsic_matrix, intrinsic_matrix, distortion_coeffs,
-            default_fov_degrees)
+            images,
+            result['joints3d'],
+            extrinsic_matrix,
+            intrinsic_matrix,
+            distortion_coeffs,
+            default_fov_degrees,
+        )
 
         result['vertices3d_nonparam'] = vertices
         result['joints3d_nonparam'] = joints
 
         vertices2d, joints2d = tf.split(
-            result['poses2d'], [body_model.num_vertices, body_model.num_joints], axis=-2)
+            result['poses2d'], [body_model.num_vertices, body_model.num_joints], axis=-2
+        )
         result['vertices2d_nonparam'] = vertices2d
         result['joints2d_nonparam'] = joints2d
         del result['poses3d']
@@ -697,69 +1042,116 @@ class MultipersonNLF(tf.Module):
         del result['uncertainties']
         return result
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
-        tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
+            tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='detector_nms_iou_threshold'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='max_detections'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='detector_both_flip_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.bool, name='suppress_implausible_poses'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
+        ]
+    )
     def detect_smpl(
-            self, image, intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
-            distortion_coeffs=DEFAULT_DISTORTION, extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1, detector_threshold=0.3,
-            detector_nms_iou_threshold=0.7, max_detections=-1, detector_flip_aug=False,
-            detector_both_flip_aug=False, suppress_implausible_poses=True, fit_l2_regularizer=1):
+        self,
+        image,
+        intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
+        distortion_coeffs=DEFAULT_DISTORTION,
+        extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        detector_threshold=0.3,
+        detector_nms_iou_threshold=0.7,
+        max_detections=-1,
+        detector_flip_aug=False,
+        detector_both_flip_aug=False,
+        suppress_implausible_poses=True,
+        fit_l2_regularizer=1,
+    ):
         images = image[tf.newaxis]
         intrinsic_matrix = intrinsic_matrix[tf.newaxis]
         distortion_coeffs = distortion_coeffs[tf.newaxis]
         extrinsic_matrix = extrinsic_matrix[tf.newaxis]
         result = self.detect_smpl_batched(
-            images, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor, num_aug,
-            detector_threshold, detector_nms_iou_threshold, max_detections, detector_flip_aug,
-            detector_both_flip_aug, suppress_implausible_poses, fit_l2_regularizer)
+            images,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            detector_threshold,
+            detector_nms_iou_threshold,
+            max_detections,
+            detector_flip_aug,
+            detector_both_flip_aug,
+            suppress_implausible_poses,
+            fit_l2_regularizer,
+        )
         return tf.nest.map_structure(lambda x: tf.squeeze(x, 0), result)
 
-    @tf.function(input_signature=[
-        tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
-        tf.TensorSpec(shape=(None, 4), dtype=tf.float32, name='boxes'),
-        tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
-        tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
-        tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
-        tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
-        tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
-        tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
-    ])
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec(shape=(None, None, 3), dtype=tf.uint8, name='image'),
+            tf.TensorSpec(shape=(None, 4), dtype=tf.float32, name='boxes'),
+            tf.TensorSpec(shape=(3, 3), dtype=tf.float32, name='intrinsic_matrix'),
+            tf.TensorSpec(shape=(None,), dtype=tf.float32, name='distortion_coeffs'),
+            tf.TensorSpec(shape=(4, 4), dtype=tf.float32, name='extrinsic_matrix'),
+            tf.TensorSpec(shape=(3,), dtype=tf.float32, name='world_up_vector'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='default_fov_degrees'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='internal_batch_size'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='antialias_factor'),
+            tf.TensorSpec(shape=(), dtype=tf.int32, name='num_aug'),
+            tf.TensorSpec(shape=(), dtype=tf.float32, name='fit_l2_regularizer'),
+        ]
+    )
     def estimate_smpl(
-            self, image, boxes, intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
-            distortion_coeffs=DEFAULT_DISTORTION, extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
-            world_up_vector=DEFAULT_WORLD_UP, default_fov_degrees=55, internal_batch_size=64,
-            antialias_factor=1, num_aug=1, fit_l2_regularizer=1):
+        self,
+        image,
+        boxes,
+        intrinsic_matrix=UNKNOWN_INTRINSIC_MATRIX,
+        distortion_coeffs=DEFAULT_DISTORTION,
+        extrinsic_matrix=DEFAULT_EXTRINSIC_MATRIX,
+        world_up_vector=DEFAULT_WORLD_UP,
+        default_fov_degrees=55,
+        internal_batch_size=64,
+        antialias_factor=1,
+        num_aug=1,
+        fit_l2_regularizer=1,
+    ):
         images = image[tf.newaxis]
         boxes = tf.RaggedTensor.from_tensor(boxes[tf.newaxis])
         intrinsic_matrix = intrinsic_matrix[tf.newaxis]
         distortion_coeffs = distortion_coeffs[tf.newaxis]
         extrinsic_matrix = extrinsic_matrix[tf.newaxis]
         result = self.estimate_smpl_batched(
-            images, boxes, intrinsic_matrix, distortion_coeffs, extrinsic_matrix,
-            world_up_vector, default_fov_degrees, internal_batch_size, antialias_factor, num_aug,
-            fit_l2_regularizer)
+            images,
+            boxes,
+            intrinsic_matrix,
+            distortion_coeffs,
+            extrinsic_matrix,
+            world_up_vector,
+            default_fov_degrees,
+            internal_batch_size,
+            antialias_factor,
+            num_aug,
+            fit_l2_regularizer,
+        )
         return tf.nest.map_structure(lambda x: tf.squeeze(x, 0), result)
 
 
@@ -786,14 +1178,14 @@ def weighted_geometric_median(x, w, n_iter=10, axis=-2, eps=1e-1, keepdims=False
 
 
 def weighted_mean(x, w, axis=-2, keepdims=False):
-    return (
-            tf.reduce_sum(x * w, axis=axis, keepdims=keepdims) /
-            tf.reduce_sum(w, axis=axis, keepdims=keepdims))
+    return tf.reduce_sum(x * w, axis=axis, keepdims=keepdims) / tf.reduce_sum(
+        w, axis=axis, keepdims=keepdims
+    )
 
 
 def project_ragged(
-        images, poses3d, extrinsic_matrix, intrinsic_matrix, distortion_coeffs,
-        default_fov_degrees):
+    images, poses3d, extrinsic_matrix, intrinsic_matrix, distortion_coeffs, default_fov_degrees
+):
     n_box_per_image = poses3d.row_lengths()
 
     n_images = tf.shape(images)[0]
@@ -802,7 +1194,8 @@ def project_ragged(
         # If intrinsic_matrix is not given, fill it in based on field of view
         if tf.reduce_all(intrinsic_matrix == -1):
             intrinsic_matrix = tfu3d.intrinsic_matrix_from_field_of_view(
-                default_fov_degrees, tf.shape(images)[1:3])
+                default_fov_degrees, tf.shape(images)[1:3]
+            )
         intrinsic_matrix = tf.repeat(intrinsic_matrix, n_images, axis=0)
 
     # If one distortion coeff/extrinsic matrix is given, repeat it for all images
@@ -817,13 +1210,15 @@ def project_ragged(
 
     poses3d_flat = poses3d.flat_values
     poses3d_flat = tf.einsum(
-        'bnk,bjk->bnj',
-        tfu3d.to_homogeneous(poses3d_flat), extrinsic_matrix_rep[:, :3, :])
+        'bnk,bjk->bnj', tfu3d.to_homogeneous(poses3d_flat), extrinsic_matrix_rep[:, :3, :]
+    )
 
     poses2d_flat_normalized = tfu3d.to_homogeneous(
-        warping.distort_points(tfu3d.project(poses3d_flat), distortion_coeffs_rep))
+        warping.distort_points(tfu3d.project(poses3d_flat), distortion_coeffs_rep)
+    )
     poses2d_flat = tf.einsum(
-        'bnk,bjk->bnj', poses2d_flat_normalized, intrinsic_matrix_rep[:, :2, :])
+        'bnk,bjk->bnj', poses2d_flat_normalized, intrinsic_matrix_rep[:, :2, :]
+    )
     poses2d_flat = tf.ensure_shape(poses2d_flat, [None, None, 2])
     poses2d = tf.RaggedTensor.from_row_splits(poses2d_flat, poses3d.row_splits)
     return poses2d

@@ -1,13 +1,10 @@
 import argparse
 import functools
-import glob
 import os.path as osp
-import pickle
 import random
-import zipfile
 
 import cameralib
-import humcentr_cli.util.serialization
+import bodycompress
 import numpy as np
 import poseviz
 import simplepyutils as spu
@@ -36,8 +33,6 @@ def initialize():
     parser.add_argument('--detector-threshold', type=float, default=0.12)
     parser.add_argument('--viz', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():
@@ -76,7 +71,7 @@ def main():
         image_paths, extra_data=image_path_ds, batch_size=FLAGS.batch_size, tee_cpu=FLAGS.viz)
     camera = cameralib.Camera.from_fov(FLAGS.default_fov, (2160, 3840))
 
-    with humcentr_cli.util.serialization.WriterPXZ(FLAGS.output_path, metadata=vars(FLAGS)) as writer:
+    with bodycompress.BodyCompressor(FLAGS.output_path, metadata=vars(FLAGS)) as writer:
         for (frame_batch_gpu, image_path_batch), frame_batch_cpu in spu.progressbar(
                 zip(frame_batches_gpu, frame_batches_cpu),
                 total=len(image_paths), step=FLAGS.batch_size):
@@ -97,8 +92,8 @@ def main():
                 image_path_batch):
 
                 image_name = osp.splitext(osp.basename(image_path.numpy().decode('utf8')))[0]
-                writer.write_frame(
-                    name=f'{image_name}.msg', camera=camera,
+                writer.append(
+                    filename=f'{image_name}.msg', camera=camera,
                     joints=joints_pred, vertices=verts_pred,
                     joint_uncertainties=joints_uncert, vertex_uncertainties=verts_uncert)
 

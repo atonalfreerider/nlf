@@ -13,11 +13,9 @@ def initialize():
     parser.add_argument('--out-pred-path', type=str, required=True)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--num-betas', type=int, default=10)
-    parser.add_argument('--l2-regul', type=float, default=1)  # e-1)
+    parser.add_argument('--l2-regul', type=float, default=1)
     parser.add_argument('--num-iter', type=int, default=3)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
 
 
 def main():
@@ -25,7 +23,7 @@ def main():
 
     fit_fn = smplfitter.tf.get_fit_fn(
         'smpl', 'neutral', num_betas=FLAGS.num_betas, enable_kid=False,
-        weighted=True, l2_regularizer=FLAGS.l2_regul, num_iter=FLAGS.num_iter,
+        weighted=True, l2_regularizer=FLAGS.l2_regul, num_iter=FLAGS.num_iter, l2_regularizer2=0,
         final_adjust_rots=True)
 
     data = spu.load_pickle(FLAGS.in_pred_path)

@@ -1,12 +1,12 @@
+import cv2
 import numpy as np
 from simplepyutils import FLAGS
 
-import nlf.tf.augmentation.color as coloraug
-from nlf.tf import improc, util
-from nlf.tf.augmentation import voc_loader
-from nlf.tf.augmentation.border import augment_border
-from nlf.tf.util import TRAIN
-import cv2
+import nlf.common.augmentation.color as coloraug
+from nlf.common import improc, util
+from nlf.common.util import TRAIN
+from nlf.common.augmentation import voc_loader
+from nlf.common.augmentation.border import augment_border
 
 
 def augment_appearance(im, learning_phase, occlude_prob, border_value, rng):
@@ -46,8 +46,9 @@ def augment_appearance(im, learning_phase, occlude_prob, border_value, rng):
             if FLAGS.jpeg_aug_prob:
                 im = jpeg_artifact(im, jpeg_rng)
 
-        if FLAGS.augment_border and border_value is not None:
-            im = augment_border(im, border_value, border_rng)
+        if FLAGS.augment_border_prob and border_value is not None:
+            if border_rng.uniform(0.0, 1.0) < FLAGS.augment_border_prob:
+                im = augment_border(im, border_value, border_rng)
 
     return im
 

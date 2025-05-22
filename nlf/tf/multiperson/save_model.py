@@ -1,6 +1,5 @@
 import argparse
 
-import numpy as np
 import simplepyutils as spu
 import tensorflow as tf
 import tensorflow_hub as hub
@@ -26,25 +25,26 @@ def main():
     parser.add_argument('--return-crops', action=spu.argparse.BoolAction)
     parser.add_argument('--noise-border', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
-    #tf.config.run_functions_eagerly(True)
 
     crop_model = hub.load(FLAGS.input_model_path)
     detector = hub.load(FLAGS.detector_path) if FLAGS.detector_path else None
 
     skeleton_infos = spu.load_pickle(FLAGS.skeleton_types_file)
     import nlf.tf.multiperson.multiperson_model as multiperson_modellib
+
     model = multiperson_modellib.MultipersonNLF(crop_model, detector, skeleton_infos)
 
     tf.saved_model.save(
-        model, FLAGS.output_model_path,
+        model,
+        FLAGS.output_model_path,
         options=tf.saved_model.SaveOptions(experimental_custom_gradients=True),
         signatures=dict(
             detect_poses_batched=model.detect_poses_batched,
             estimate_poses_batched=model.estimate_poses_batched,
             detect_poses=model.detect_poses,
-            estimate_poses=model.estimate_poses))
+            estimate_poses=model.estimate_poses,
+        ),
+    )
     #
     # model_loaded = tf.saved_model.load(FLAGS.output_model_path)
     # result = model_loaded.detect_poses_batched(im, weights=model.smpl_weights,

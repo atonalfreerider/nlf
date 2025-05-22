@@ -9,8 +9,8 @@ import scipy.sparse as sps
 from simplepyutils import FLAGS
 from sklearn import linear_model
 
-import nlf.tf.augmentation.background as bgaug
-from nlf.tf.util import TRAIN
+import nlf.common.augmentation.background as bgaug
+from nlf.common.util import TRAIN
 
 
 @functools.lru_cache(512)

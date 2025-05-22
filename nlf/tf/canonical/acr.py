@@ -1,20 +1,19 @@
 # Affine-combining regressor with regularization to minimize spatial support of weights.
-import tensorflow as tf
-
 import fleras
+import tensorflow as tf
 from affine_combining_autoencoder import AffineCombinationLayer
-from fleras.easydict import EasyDict
+from fleras import EasyDict
 
 
 class AffineCombiningRegressor(tf.keras.Model):
     def __init__(
             self, n_sided_joints, n_center_joints, n_latent_points_sided, n_latent_points_center,
-            w_init=None, chiral=True):
+            chiral=True):
         super().__init__()
 
         self.layer = AffineCombinationLayer(
             n_sided_joints, n_center_joints, n_latent_points_sided, n_latent_points_center,
-            transposed=False, use_w_x=True, use_w_q=True, w_init=w_init, chiral=chiral)
+            transposed=False, chiral=chiral)
 
     def call(self, inp):
         return self.layer(inp)

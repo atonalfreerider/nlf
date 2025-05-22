@@ -27,8 +27,7 @@ def initialize():
     parser.add_argument('--correct-S9', action=spu.argparse.BoolAction, default=False)
     parser.add_argument('--viz', action=spu.argparse.BoolAction)
     spu.argparse.initialize(parser)
-    for gpu in tf.config.experimental.list_physical_devices('GPU'):
-        tf.config.experimental.set_memory_growth(gpu, True)
+
 
 
 def main():
